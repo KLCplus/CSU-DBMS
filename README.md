@@ -1,5 +1,7 @@
 # MiniOB 介绍
 
+> **声明：本项目仅供学习用途，不承诺代码安全及稳定可靠。请勿将其直接用于生产环境。**
+
 <div align="left">
 
 [![Chinese Doc](https://img.shields.io/badge/文档-简体中文-blue)](https://oceanbase.github.io/miniob/)

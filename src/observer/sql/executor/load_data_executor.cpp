@@ -24,13 +24,11 @@ using namespace common;
 
 RC LoadDataExecutor::execute(SQLStageEvent *sql_event)
 {
-  RC            rc         = RC::SUCCESS;
   SqlResult    *sql_result = sql_event->session_event()->sql_result();
   LoadDataStmt *stmt       = static_cast<LoadDataStmt *>(sql_event->stmt());
   Table        *table      = stmt->table();
   const char   *file_name  = stmt->filename();
-  load_data(table, file_name, stmt->terminated(), stmt->enclosed(), sql_result);
-  return rc;
+  return load_data(table, file_name, stmt->terminated(), stmt->enclosed(), sql_result);
 }
 
 /**
@@ -83,7 +81,7 @@ RC insert_record_from_file(
 
 
 // TODO: pax format and row format
-void LoadDataExecutor::load_data(Table *table, const char *file_name, char terminated, char enclosed, SqlResult *sql_result)
+RC LoadDataExecutor::load_data(Table *table, const char *file_name, char terminated, char enclosed, SqlResult *sql_result)
 {
   // your code here
   stringstream result_string;
@@ -94,7 +92,7 @@ void LoadDataExecutor::load_data(Table *table, const char *file_name, char termi
     result_string << "Failed to open file: " << file_name << ". system error=" << strerror(errno) << endl;
     sql_result->set_return_code(RC::FILE_NOT_EXIST);
     sql_result->set_state_string(result_string.str());
-    return;
+    return RC::FILE_NOT_EXIST;
   }
 
   struct timespec begin_time;
@@ -144,6 +142,8 @@ void LoadDataExecutor::load_data(Table *table, const char *file_name, char termi
   if (RC::SUCCESS == rc) {
     result_string << strrc(rc);
   }
-  LOG_INFO("load data done. row num: %s, result: %s", insertion_count, strrc(rc));
-  sql_result->set_return_code(RC::SUCCESS);
+  LOG_INFO("load data done. row num: %d, result: %s", insertion_count, strrc(rc));
+  sql_result->set_return_code(rc);
+  sql_result->set_state_string(result_string.str());
+  return rc;
 }
