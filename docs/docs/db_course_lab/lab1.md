@@ -71,7 +71,6 @@ CAS 通常由硬件提供支持，现代处理器通常都提供相应的指令�
 
 **思考**：`compare_exchange_weak()` 和 `compare_exchange_strong()` 的区别是什么？在实现这一任务时，你应该使用哪一个还是任意一个都可以？
 
-cpplings(`./src/cpplings`) 中也提供了一个练习 CAS 的例子，可参考 `src/cpplings/cas.cpp`，本练习不作为实验的一部分，不计入成绩，仅供练习参考。
 
 #### 跳表（SkipList）
 

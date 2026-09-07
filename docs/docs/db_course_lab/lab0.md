@@ -6,10 +6,10 @@ title: LAB#0 C++ 基础入门
 
 # LAB#0 C++ 基础
 
-MiniOB 是用 C++ 编写的，为了便于大家入门数据库系统实现原理与实践课程，这里提供了若干 C++ 编程特性相关的小练习（Cpplings），帮助大家熟悉一些 C++ 特性。一道简单的编程题目（实现 Bloom Filter），帮助大家熟悉 C++ 编程及 MiniOB 开发环境。其中 Cppings **不计入**实验成绩。
+MiniOB 是用 C++ 编写的。本实验通过一道简单的编程题目（实现 Bloom Filter），帮助大家熟悉 C++ 编程及 MiniOB 开发环境。
 
-## C++ 小练习（Cpplings）
-请参考 Cpplings: `src/cpplings/README.md`
+## C++ 基础准备
+请先准备支持 C++20 的基础开发环境，并熟悉线程、锁、智能指针与 STL 等 C++ 基础知识。
 
 ## C++ 入门题目（Bloom Filter）
 
