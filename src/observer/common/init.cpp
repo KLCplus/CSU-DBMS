@@ -140,7 +140,7 @@ int init_global_objects(ProcessParam *process_param, Ini &properties)
 
   int ret = 0;
 
-  RC rc = GCTX.handler_->init("miniob", 
+  RC rc = GCTX.handler_->init("csudb_data",
                               process_param->trx_kit_name().c_str(),
                               process_param->durability_mode().c_str(),
                               process_param->storage_engine().c_str(),

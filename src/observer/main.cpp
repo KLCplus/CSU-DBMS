@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 
 #include <netinet/in.h>
 #include <unistd.h>
+#include <getopt.h>
 
 #include "common/ini_setting.h"
 #include "common/init.h"
@@ -35,20 +36,37 @@ using namespace common;
 
 static Server *g_server = nullptr;
 
-void usage()
+namespace {
+
+constexpr const char *CSUDB_VERSION = "0.1.0";
+
+bool is_csudb_cli_frontend()
 {
-  cout << "Usage " << endl;
-  cout << "-p: server port. if not specified, the item in the config file will be used" << endl;
-  cout << "-f: path of config file." << endl;
-  cout << "-s: use unix socket and the argument is socket address" << endl;
-  cout << "-P: protocol. {plain(default), mysql, cli}." << endl;
-  cout << "-t: transaction model. {vacuous(default), mvcc}." << endl;
-  cout << "-T: thread handling model. {one-thread-per-connection(default),java-thread-pool}." << endl;
-  cout << "-n: buffer pool memory size in byte" << endl;
-  cout << "-r: buffer pool replacement policy. {lru(default), fifo}." << endl;
-  cout << "-d: durbility mode. {vacuous(default), disk}" << endl;
-  // TODO: support multi dbs(storage/db/db.h) and remove this options
-  cout << "-E: storage engine. {heap(default), lsm}" << endl;
+#ifdef CSUDB_CLI_FRONTEND
+  return true;
+#else
+  return false;
+#endif
+}
+
+}  // namespace
+
+void usage(const char *program)
+{
+  cout << "CSU-DBMS " << CSUDB_VERSION << endl;
+  cout << "Usage: " << program << " [options]" << endl << endl;
+  cout << "  -h, --help                 Show this help" << endl;
+  cout << "  -v, --version              Show version" << endl;
+  cout << "  -f, --config PATH          Configuration file" << endl;
+  cout << "  -P, --protocol MODE        cli, plain, or mysql" << endl;
+  cout << "  -p, --port PORT            Server port" << endl;
+  cout << "  -s, --socket PATH          Unix socket path" << endl;
+  cout << "  -t, --transaction MODEL    vacuous or mvcc" << endl;
+  cout << "  -T, --threads MODEL        one-thread-per-connection or java-thread-pool" << endl;
+  cout << "  -n, --buffer-size BYTES    Buffer pool capacity" << endl;
+  cout << "  -r, --replacement POLICY   lru or fifo" << endl;
+  cout << "  -d, --durable              Enable disk durability" << endl;
+  cout << "  -E, --engine ENGINE        heap or lsm" << endl;
 }
 
 void parse_parameter(int argc, char **argv)
@@ -59,10 +77,30 @@ void parse_parameter(int argc, char **argv)
 
   process_param->init_default(process_name);
 
+  if (is_csudb_cli_frontend()) {
+    process_param->set_protocol("cli");
+#ifdef CSUDB_DEFAULT_CONFIG
+    process_param->set_conf(CSUDB_DEFAULT_CONFIG);
+#endif
+  }
+
   // Process args
-  int          opt;
-  extern char *optarg;
-  while ((opt = getopt(argc, argv, "dp:P:s:t:T:f:o:e:E:hn:r:")) > 0) {
+  static option long_options[] = {{"help", no_argument, nullptr, 'h'},
+      {"version", no_argument, nullptr, 'v'},
+      {"config", required_argument, nullptr, 'f'},
+      {"protocol", required_argument, nullptr, 'P'},
+      {"port", required_argument, nullptr, 'p'},
+      {"socket", required_argument, nullptr, 's'},
+      {"transaction", required_argument, nullptr, 't'},
+      {"threads", required_argument, nullptr, 'T'},
+      {"buffer-size", required_argument, nullptr, 'n'},
+      {"replacement", required_argument, nullptr, 'r'},
+      {"durable", no_argument, nullptr, 'd'},
+      {"engine", required_argument, nullptr, 'E'},
+      {nullptr, 0, nullptr, 0}};
+
+  int opt;
+  while ((opt = getopt_long(argc, argv, "dp:P:s:t:T:f:o:e:E:hvn:r:", long_options, nullptr)) > 0) {
     switch (opt) {
       case 's': process_param->set_unix_socket_path(optarg); break;
       case 'p': process_param->set_server_port(atoi(optarg)); break;
@@ -77,7 +115,11 @@ void parse_parameter(int argc, char **argv)
       case 'r': process_param->set_buffer_pool_replacement_policy(optarg); break;
       case 'd': process_param->set_durability_mode("disk"); break;
       case 'h':
-        usage();
+        usage(argv[0]);
+        exit(0);
+        return;
+      case 'v':
+        cout << "CSU-DBMS " << CSUDB_VERSION << endl;
         exit(0);
         return;
       default: cout << "Unknown option: " << static_cast<char>(opt) << ", ignored" << endl; break;
@@ -172,25 +214,33 @@ void quit_signal_handle(int signum)
   pthread_create(&tid, nullptr, quit_thread_func, (void *)(intptr_t)signum);
 }
 
-const char *startup_tips = R"(
-Welcome to the OceanBase database implementation course.
-
-Copyright (c) 2021 OceanBase and/or its affiliates.
-
-Learn more about OceanBase at https://github.com/oceanbase/oceanbase
-Learn more about MiniOB at https://github.com/oceanbase/miniob
-
+void print_startup_screen()
+{
+  cout << R"(
+╭──────────────────────────────────────────────────────────╮
+│                      CSU-DBMS                            │
+│       Compiler × Database × Operating Systems            │
+╰──────────────────────────────────────────────────────────╯
 )";
+
+  if (strcasecmp(the_process_param()->get_protocol().c_str(), "cli") == 0) {
+    cout << "Ready. Enter SQL directly (a trailing ';' is recommended)." << endl;
+    cout << "Type 'help;' for SQL examples; type 'exit' or '\\q' to leave." << endl;
+    cout << "Data directory: ./csudb_data/db/sys" << endl << endl;
+  } else {
+    cout << "CSU-DBMS server is starting. Press Ctrl+C to stop." << endl << endl;
+  }
+}
 
 int main(int argc, char **argv)
 {
   int rc = STATUS_SUCCESS;
 
-  cout << startup_tips;
-
   set_signal_handler(quit_signal_handle);
 
   parse_parameter(argc, argv);
+
+  print_startup_screen();
 
   rc = init(the_process_param());
   if (rc != STATUS_SUCCESS) {

@@ -1,6 +1,6 @@
-# MiniDB Baseline v0.1 Record
+# CSU-DBMS Baseline v0.1 Record
 
-> 本文记录基座整理时的验收快照。后续 OS Page/Buffer Pool 实验实现与最新测试结果见 `os_storage.md`。
+> 本文前半部分保留基座整理时的历史验收快照；当前 CSU-DBMS CLI、OS Page/Buffer Pool 实验与最新结果分别见第 12 节、`cli.md` 和 `os_storage.md`。
 
 ## 1. Revision
 
@@ -56,7 +56,7 @@ cd /tmp/minidb-baseline-final.lAod8n
   -P cli
 ```
 
-结果：成功加载配置，出现 `miniob >` 提示符。退出后进程返回 0。
+历史结果：成功加载配置并进入交互提示符，退出后进程返回 0。当前入口与提示符见第 12 节。
 
 可移植写法见项目 README：将仓库绝对路径替换为本机路径即可。observer 会在**启动时的当前工作目录**下创建 `miniob/db/sys`。
 
@@ -169,11 +169,11 @@ ctest --output-on-failure -j4
 
 可能影响：不能再构建/预加载 `libmemtracer.so`，也不能运行其专属单测与性能测试。ASAN Debug 构建仍保留，后续 OS I/O/Page Trace 计划不依赖 MemTracer。
 
-### Removed: repository governance/license text files
+### Removed: repository governance text files
 
-按课程仓库维护方的明确要求，删除根目录 `CODE_OF_CONDUCT.md`、`CONTRIBUTING.md`、`License` 和 `NOTICE`。这些文件不参与编译或运行。
+按课程仓库维护方要求删除根目录 `CODE_OF_CONDUCT.md` 和 `CONTRIBUTING.md`，它们不参与编译或运行。
 
-可能影响：本地仓库不再自带上游贡献规范及许可文本；MiniOB 上游许可不会因删除文件而失效，发布或再分发前需要重新核对并按适用许可补齐声明。
+`License` 与 `NOTICE` 已在 CSU-DBMS CLI 整理阶段恢复。公开分发派生代码时必须提供许可证副本并保留原有版权、专利、商标及免责声明；产品界面无需使用上游品牌。
 
 ### Not removed
 
@@ -197,7 +197,7 @@ ctest --output-on-failure -j4
 4. 默认 `ENABLE_ASAN=ON`；适合 Debug，但运行结果和性能不应作为 Release benchmark。
 5. `Catalog` 当前主要持有内存中的 `TableStats`；schema metadata 主要由 `Db/TableMeta/FieldMeta/IndexMeta` 提供，不应把 `Catalog` 单例误认为完整持久化 Data Dictionary。
 6. README 的运行命令使用 `/tmp` 隔离数据；如果从仓库根启动，会产生仓库内运行数据，应避免提交。
-7. 根目录 `License`/`NOTICE` 已按课程仓库要求删除；这不会影响构建，但对公开分发存在许可与声明风险，需要仓库维护者后续确认。
+7. 根目录 `License`/`NOTICE` 已恢复并保留；不得再以“去品牌”为理由删除源码版权头或开源许可文本。
 
 ## 11. Next development notes
 
@@ -206,3 +206,41 @@ ctest --output-on-failure -j4
 - Buffer/Page Trace 从 `DiskBufferPool::get_this_page`, `allocate_page`, `unpin_page`, `load_page`, `write_page` 开始。
 - 修复 Advanced 并发测试前，应先用 `CONCURRENCY` 配置矩阵复现并理解 Frame pin/latch ownership；不要通过删除断言掩盖问题。
 - 每个阶段都维持 `Debug build + unit tests + CLI SQL + restart persistence` 回归门槛。
+
+
+## 12. CSU-DBMS CLI packaging verification (2026-09-08)
+
+本次将用户入口包装为 CSU-DBMS 自有 CLI，核心数据库架构和文件格式未重写。
+
+实际构建命令：
+
+```bash
+./build.sh debug --make -j4
+```
+
+构建成功，新增产物 `build_debug/bin/csudb` 与 `build_debug/bin/csudb-client`；`observer`、`obclient` 作为旧测试兼容入口保留。`./csudb --version` 返回 `CSU-DBMS 0.1.0`，`./csudb --help` 可正常显示长选项。
+
+在 `/tmp/csudb_cli_verify_20260908` 中实际执行：
+
+```sql
+help;
+CREATE TABLE student (id INT, name CHAR(20));
+INSERT INTO student VALUES (1, 'Alice');
+INSERT INTO student VALUES (2, 'Bob');
+SELECT * FROM student;
+SELECT name FROM student WHERE id = 1;
+DELETE FROM student WHERE id = 1;
+SELECT * FROM student;
+```
+
+欢迎页、`csudb >` 提示符、内置帮助和全部 SQL 均成功；删除后只剩 `2 | Bob`。退出并用 `./csudb` 在相同工作目录重启后再次查询，仍返回 Bob，持久化通过。数据目录为 `csudb_data/db/sys`，历史文件为 `.csudb_history`。
+
+完整测试命令：
+
+```bash
+ctest --test-dir build_debug --output-on-failure
+```
+
+结果为 47 项中 45 项通过（96%）。失败项仍是历史基线已记录的 `bplus_tree_log_test` 并发 pin-count 断言和 `mvcc_trx_log_test` ASAN use-after-free/提交断言；`buffer_pool_os_test` 通过。本次没有修改对应 Advanced/Reserved 核心实现。
+
+品牌边界：所有正式 SQL、网络和 LSM CLI 的欢迎语、提示符、历史文件和默认数据/日志路径均已切换为 CSU-DBMS。源码中的 `MiniobLineReader`、`observer` 静态库名、`oceanbase` namespace 等内部兼容标识暂不进行大规模重命名，以免破坏 ABI 和成熟核心；上游版权头、`License`、`NOTICE` 因开源许可要求必须保留。
