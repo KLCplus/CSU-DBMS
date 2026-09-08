@@ -385,6 +385,7 @@ gdb --args build_debug/bin/csudb
 - `docs/course/architecture.md`
 - `docs/course/grammar.md`
 - `docs/course/source_map.md`
+- `docs/course/module_files.md`
 - `docs/course/baseline.md`
 - `docs/course/os_storage.md`
 
