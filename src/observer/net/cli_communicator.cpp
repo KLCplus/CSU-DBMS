@@ -25,7 +25,7 @@ See the Mulan PSL v2 for more details. */
 
 using common::MiniobLineReader;
 
-const std::string LINE_HISTORY_FILE = "./.miniob.history";
+const std::string LINE_HISTORY_FILE = "./.csudb_history";
 
 RC CliCommunicator::init(int fd, unique_ptr<Session> session, const string &addr)
 {
@@ -56,7 +56,7 @@ RC CliCommunicator::init(int fd, unique_ptr<Session> session, const string &addr
 RC CliCommunicator::read_event(SessionEvent *&event)
 {
   event                  = nullptr;
-  const char *prompt_str = "miniob > ";
+  const char *prompt_str = "csudb > ";
   std::string command    = MiniobLineReader::instance().my_readline(prompt_str);
   if (command.empty()) {
     return RC::SUCCESS;

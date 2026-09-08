@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -e
+
+CSUDB_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CSUDB_BINARY="${CSUDB_BUILD_DIR:-${CSUDB_ROOT}/build_debug}/bin/csudb"
+CSUDB_CONFIG="${CSUDB_ROOT}/etc/csudb.ini"
+
+show_launcher_help()
+{
+  echo "CSU-DBMS command line"
+  echo
+  echo "Usage:"
+  echo "  ./csudb                  Start the interactive SQL shell"
+  echo "  ./csudb server [options] Start the network server"
+  echo "  ./csudb --help           Show all engine options"
+  echo "  ./csudb --version        Show the version"
+  echo
+  echo "Build first with: ./build.sh debug --make -j4"
+}
+
+if [[ ! -x "${CSUDB_BINARY}" ]]; then
+  show_launcher_help
+  echo
+  echo "Error: ${CSUDB_BINARY} was not found. Build CSU-DBMS first." >&2
+  exit 1
+fi
+
+case "${1:-}" in
+  server)
+    shift
+    exec "${CSUDB_BINARY}" --config "${CSUDB_CONFIG}" --protocol plain "$@"
+    ;;
+  --launcher-help)
+    show_launcher_help
+    ;;
+  *)
+    exec "${CSUDB_BINARY}" --config "${CSUDB_CONFIG}" --protocol cli "$@"
+    ;;
+esac

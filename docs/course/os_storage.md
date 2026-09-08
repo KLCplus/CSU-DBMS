@@ -169,11 +169,10 @@ ctest --output-on-failure \
 在独立目录启动，避免数据进入仓库：
 
 ```bash
-mkdir -p /tmp/minidb-os-lru
-cd /tmp/minidb-os-lru
-/path/to/miniob/build_debug/bin/observer \
-  -f /path/to/miniob/etc/observer.ini -P cli \
-  -n 262144 -r lru
+mkdir -p /tmp/csudb-os-lru
+cd /tmp/csudb-os-lru
+/path/to/CSU-DBMS/csudb \
+  --buffer-size 262144 --replacement lru
 ```
 
 执行：

@@ -23,18 +23,14 @@ See the Mulan PSL v2 for more details. */
 using namespace oceanbase;
 using common::MiniobLineReader;
 
-const string prompt = "\033[32moblsm> \033[0m";
+const string prompt = "\033[32mcsudb-lsm > \033[0m";
 bool         quit   = false;
 ObLsm       *lsm    = nullptr;
 ObLsmOptions opt;
 
 const char *startup_tips = R"(
-Welcome to the OceanBase database implementation course.
-
-Copyright (c) 2021 OceanBase and/or its affiliates.
-
-Learn more about OceanBase at https://github.com/oceanbase/oceanbase
-Learn more about MiniOB at https://github.com/oceanbase/miniob
+CSU-DBMS LSM Storage Lab
+Advanced/reserved key-value storage shell.
 
 )";
 
@@ -114,7 +110,7 @@ void help()
 int main(int, char **)
 {
   print_sys_msg(startup_tips);
-  print_sys_msg("Enter the help command to view the usage of oblsm_cli");
+  print_sys_msg("Enter the help command to view CSU-DBMS LSM shell usage");
 
   MiniobLineReader::instance().init(LINE_HISTORY_FILE);
 
