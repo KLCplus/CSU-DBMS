@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 set(CMAKE_CXX_STANDARD 20)
 
-project(minidb)
+project(csudb)
 
 MESSAGE(STATUS "This is Project source dir " ${PROJECT_SOURCE_DIR})
 MESSAGE(STATUS "This is PROJECT_BINARY_DIR dir " ${PROJECT_BINARY_DIR})
@@ -24,7 +24,7 @@ message(STATUS "Using build type: ${CMAKE_BUILD_TYPE}")
 OPTION(ENABLE_ASAN "Enable build with address sanitizer" ON)
 OPTION(ENABLE_TSAN "Build with thread sanitizer" OFF)
 OPTION(ENABLE_UBSAN "Build with undefined behavior sanitizer" OFF)
-OPTION(WITH_UNIT_TESTS "Compile miniob with unit tests" ON)
+OPTION(WITH_UNIT_TESTS "Compile CSU-DBMS with unit tests" ON)
 OPTION(WITH_BENCHMARK "Compile benchmark" OFF)
 OPTION(ENABLE_COVERAGE "Enable unittest coverage" OFF)
 OPTION(ENABLE_NOPIE "Enable no pie" OFF)

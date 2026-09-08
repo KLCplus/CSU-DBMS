@@ -1,6 +1,8 @@
-# MiniDB Baseline
+# CSU-DBMS
 
-MiniDB Baseline v0.1 是基于 [OceanBase MiniOB](https://github.com/oceanbase/miniob) 整理的课程项目基座。它服务于“编译原理 + 数据库系统 + 操作系统”融合课程，目标是保留 MiniOB 成熟、可运行、可扩展的 DBMS 骨架，并为后续实验提供清晰的源码入口。
+CSU-DBMS v0.1 是面向“编译原理 + 数据库系统 + 操作系统”融合课程开发的教学数据库。当前版本提供独立的 `csudb` 交互命令、完整 SQL 执行链和可继续扩展的页式存储基座。
+
+产品界面、命令入口、提示符、配置和运行目录均使用 CSU-DBMS 品牌；项目保留依法必须存在的上游版权与开源许可声明，二者不是产品宣传。
 
 > Baseline 原则：稳定性 > 可读性 > 精简程度。本次没有重写 Parser、Executor、Storage、Buffer Pool、B+Tree、Transaction 或日志实现。
 
@@ -83,7 +85,7 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 | `benchmark/` | 核心模块性能/并发基准 | Advanced/Reserved |
 | `etc/` | observer 配置 | 启动必需 |
 | `docs/course/` | 本课程架构、语法、OS 存储实验、源码地图和验收记录 | 新开发者先读 |
-| `docs/docs/` | MiniOB 上游文档 | 深入时查阅 |
+| `docs/docs/` | 历史技术参考（保留上游术语） | 仅按需查阅；产品用法以 `docs/course/` 为准 |
 
 推荐阅读顺序：本 README → `docs/course/architecture.md` → `docs/course/source_map.md` → `sql_task_handler.cpp` → SQL 各 Stage → Table/Record/Buffer。
 
@@ -288,31 +290,39 @@ sudo apt install -y build-essential cmake flex bison gdb git
 ./build.sh debug --make -j4
 ```
 
-产物位于 `build_debug/bin/observer`、`build_debug/bin/obclient` 和 `build_debug/lib/libobserver.a`。`build` 是脚本创建的指向 `build_debug` 的符号链接。首次构建必须初始化 submodule 和第三方库。若 CMake 报找不到 FLEX/BISON，应先安装环境依赖，不要修改 Parser 生成流程。
+产物位于 `build_debug/bin/csudb`、`build_debug/bin/csudb-client`，并保留兼容目标 `observer` 和 `obclient`。`build` 是脚本创建的指向 `build_debug` 的符号链接。首次构建必须初始化 submodule 和第三方库。若 CMake 报找不到 FLEX/BISON，应先安装环境依赖，不要修改 Parser 生成流程。
 
 ## 10. 启动
 
-CLI 模式最适合单步调试。observer 以当前工作目录为根创建 `miniob/db/sys`，因此建议使用独立运行目录：
+从仓库根目录直接进入交互式 SQL Shell：
 
 ```bash
-mkdir -p /tmp/minidb-baseline
-cd /tmp/minidb-baseline
-/path/to/miniob/build_debug/bin/observer \
-  -f /path/to/miniob/etc/observer.ini \
-  -P cli
+./csudb
 ```
 
-本次验证使用同样的 CLI 调用方式和独立 `/tmp` 数据目录。网络模式仍保留，参见 `docs/docs/how_to_run.md`。
+进入后会看到 CSU-DBMS 欢迎界面和 `csudb >` 提示符。输入 `help;` 查看示例，输入 `exit`、`bye` 或 `\q` 退出。默认数据保存在当前工作目录的 `csudb_data/db/sys`，命令历史保存在 `.csudb_history`。
 
-OS 缓存实验可指定 Buffer Pool 字节数和替换策略。例如使用 32 个 8 KiB Frame 和 FIFO：
+查看参数与版本：
 
 ```bash
-/path/to/miniob/build_debug/bin/observer \
-  -f /path/to/miniob/etc/observer.ini -P cli \
-  -n 262144 -r fifo
+./csudb --help
+./csudb --version
 ```
 
-`-r` 支持 `lru`（默认）和 `fifo`。`observer.log.<日期>` 中的 `[BUFFER_POOL_TRACE]` 是逐事件日志，进程退出时的 `[BUFFER_POOL_STATS]` 是汇总统计。完整实验方法见 `docs/course/os_storage.md`。
+启动 plain 协议网络服务及客户端：
+
+```bash
+./csudb server --port 6789
+build_debug/bin/csudb-client -h 127.0.0.1 -p 6789
+```
+
+OS 缓存实验可直接指定 Buffer Pool 字节数和替换策略。例如使用 32 个 8 KiB Frame 和 FIFO：
+
+```bash
+./csudb --buffer-size 262144 --replacement fifo
+```
+
+`--replacement` 支持 `lru`（默认）和 `fifo`。`csudb.log.<日期>` 中的 `[BUFFER_POOL_TRACE]` 是逐事件日志，进程退出时的 `[BUFFER_POOL_STATS]` 是汇总统计。完整 CLI 指南见 `docs/course/cli.md`，缓存实验方法见 `docs/course/os_storage.md`。
 
 ## 11. 基础 SQL Demo
 
@@ -334,10 +344,10 @@ SELECT * FROM student;
 
 ```bash
 ./build.sh debug --make -j4
-gdb --args build_debug/bin/observer -f etc/observer.ini -P cli
+gdb --args build_debug/bin/csudb
 ```
 
-若从仓库根目录启动，数据会落在仓库下的 `miniob/`；更推荐先进入独立运行目录并使用绝对路径启动。
+默认数据目录是启动工作目录下的 `csudb_data/`；调试临时数据时，可先进入单独的运行目录再启动 `build_debug/bin/csudb`。
 
 第一次追 SELECT 建议按顺序在这些位置下断点：
 
@@ -378,6 +388,6 @@ gdb --args build_debug/bin/observer -f etc/observer.ini -P cli
 - `docs/course/baseline.md`
 - `docs/course/os_storage.md`
 
-## License and upstream
+## License and source attribution
 
-本项目派生自 OceanBase MiniOB。课程仓库已按项目要求移除根目录治理与许可文本文件；上游许可仍适用于派生代码，发布或再分发前应核对 [MiniOB 上游仓库](https://github.com/oceanbase/miniob) 的许可与声明。
+CSU-DBMS 的产品名称、CLI 与新增课程功能由本项目独立维护。仓库包含在木兰宽松许可证第 2 版下使用和修改的上游开源代码，因此依法保留原文件中的版权、专利、商标和免责声明；详见根目录 `License` 与 `NOTICE`。这些声明只用于履行开源许可，不代表上游对 CSU-DBMS 的背书。
