@@ -143,7 +143,9 @@ int init_global_objects(ProcessParam *process_param, Ini &properties)
   RC rc = GCTX.handler_->init("miniob", 
                               process_param->trx_kit_name().c_str(),
                               process_param->durability_mode().c_str(),
-                              process_param->storage_engine().c_str());
+                              process_param->storage_engine().c_str(),
+                              process_param->buffer_pool_memory_size(),
+                              process_param->buffer_pool_replacement_policy().c_str());
   if (OB_FAIL(rc)) {
     LOG_ERROR("failed to init handler. rc=%s", strrc(rc));
     return -1;

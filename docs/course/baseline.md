@@ -1,5 +1,7 @@
 # MiniDB Baseline v0.1 Record
 
+> 本文记录基座整理时的验收快照。后续 OS Page/Buffer Pool 实验实现与最新测试结果见 `os_storage.md`。
+
 ## 1. Revision
 
 - Upstream repository: `https://github.com/oceanbase/miniob`

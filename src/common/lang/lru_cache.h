@@ -106,6 +106,21 @@ public:
     return true;
   }
 
+  /**
+   * @brief 查询元素但不改变 LRU 顺序
+   * @details Buffer Pool 的 FIFO 策略使用此接口，以保持页面首次进入缓存时的顺序。
+   */
+  bool peek(const Key &key, Value &value)
+  {
+    auto iter = searcher_.find((ListNode *)&key);
+    if (iter == searcher_.end()) {
+      return false;
+    }
+
+    value = (*iter)->value_;
+    return true;
+  }
+
   void put(const Key &key, const Value &value)
   {
     auto iter = searcher_.find((ListNode *)&key);
