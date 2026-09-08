@@ -38,11 +38,13 @@ string BPFileHeader::to_string() const
 
 ////////////////////////////////////////////////////////////////////////////////
 
-BPFrameManager::BPFrameManager(const char *name) : allocator_(name) {}
+BPFrameManager::BPFrameManager(const char *name, BufferPoolReplacementPolicy replacement_policy)
+    : allocator_(name), replacement_policy_(replacement_policy)
+{}
 
-RC BPFrameManager::init(int pool_num)
+RC BPFrameManager::init(int pool_num, int item_num_per_pool)
 {
-  int ret = allocator_.init(false, pool_num);
+  int ret = allocator_.init(false, pool_num, item_num_per_pool);
   if (ret == 0) {
     return RC::SUCCESS;
   }
@@ -87,8 +89,15 @@ int BPFrameManager::purge_frames(int count, function<RC(Frame *frame)> purger)
   /// 他需要把脏页数据刷新到磁盘上去，所以这里会极大地降低并发度
   int freed_count = 0;
   for (Frame *frame : frames_can_purge) {
+    const bool dirty = frame->dirty();
     RC rc = purger(frame);
     if (RC::SUCCESS == rc) {
+      stats_.record_eviction(dirty);
+      LOG_TRACE("[BUFFER_POOL_TRACE] event=EVICT policy=%s buffer_pool_id=%d page_num=%d dirty=%d",
+          buffer_pool_replacement_policy_name(replacement_policy_),
+          frame->buffer_pool_id(),
+          frame->page_num(),
+          dirty);
       free_internal(frame->frame_id(), frame);
       freed_count++;
     } else {
@@ -112,7 +121,11 @@ Frame *BPFrameManager::get(int buffer_pool_id, PageNum page_num)
 Frame *BPFrameManager::get_internal(const FrameId &frame_id)
 {
   Frame *frame = nullptr;
-  (void)frames_.get(frame_id, frame);
+  if (replacement_policy_ == BufferPoolReplacementPolicy::LRU) {
+    (void)frames_.get(frame_id, frame);
+  } else {
+    (void)frames_.peek(frame_id, frame);
+  }
   if (frame != nullptr) {
     frame->pin();
     LOG_DEBUG("got a frame. frame=%s", frame->to_string().c_str());
@@ -318,10 +331,20 @@ RC DiskBufferPool::get_this_page(PageNum page_num, Frame **frame)
 
   Frame *used_match_frame = frame_manager_.get(id(), page_num);
   if (used_match_frame != nullptr) {
+    frame_manager_.stats().record_page_request(true);
+    LOG_TRACE("[BUFFER_POOL_TRACE] event=HIT policy=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+        buffer_pool_replacement_policy_name(frame_manager_.replacement_policy()),
+        id(),
+        page_num,
+        used_match_frame->pin_count());
     used_match_frame->access();
     *frame = used_match_frame;
     return RC::SUCCESS;
   }
+
+  frame_manager_.stats().record_page_request(false);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=MISS policy=%s buffer_pool_id=%d page_num=%d",
+      buffer_pool_replacement_policy_name(frame_manager_.replacement_policy()), id(), page_num);
 
   scoped_lock lock_guard(lock_);  // 直接加了一把大锁，其实可以根据访问的页面来细化提高并行度
 
@@ -373,6 +396,9 @@ RC DiskBufferPool::allocate_page(Frame **frame)
         }
 
         hdr_frame_->set_lsn(lsn);
+
+        frame_manager_.stats().record_page_allocation();
+        LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE buffer_pool_id=%d page_num=%d reused=1", id(), i);
 
         LOG_DEBUG("allocate a new page without extend buffer pool. page num=%d, buffer pool=%d", i, id());
 
@@ -431,6 +457,8 @@ RC DiskBufferPool::allocate_page(Frame **frame)
   lock_.unlock();
 
   *frame = allocated_frame;
+  frame_manager_.stats().record_page_allocation();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE buffer_pool_id=%d page_num=%d reused=0", id(), page_num);
   return RC::SUCCESS;
 }
 
@@ -462,6 +490,8 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
   file_header_->allocated_pages--;
   char tmp = 1 << (page_num % 8);
   file_header_->bitmap[page_num / 8] &= ~tmp;
+  frame_manager_.stats().record_page_disposal();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISPOSE buffer_pool_id=%d page_num=%d", id(), page_num);
   return RC::SUCCESS;
 }
 
@@ -561,6 +591,9 @@ RC DiskBufferPool::flush_page_internal(Frame &frame)
   }
 
   frame.clear_dirty();
+  frame_manager_.stats().record_flush();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=FLUSH buffer_pool_id=%d page_num=%d",
+      frame.buffer_pool_id(), frame.page_num());
   LOG_DEBUG("Flush block. file desc=%d, frame=%s", file_desc_, frame.to_string().c_str());
 
   return RC::SUCCESS;
@@ -610,6 +643,9 @@ RC DiskBufferPool::write_page(PageNum page_num, Page &page)
     return RC::IOERR_WRITE;
   }
 
+  frame_manager_.stats().record_disk_write();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_WRITE buffer_pool_id=%d page_num=%d bytes=%d",
+      id(), page_num, BP_PAGE_SIZE);
   LOG_TRACE("write_page: buffer_pool_id:%d, page_num:%d, lsn=%d, check_sum=%d", id(), page_num, page.lsn, page.check_sum);
   return RC::SUCCESS;
 }
@@ -714,7 +750,11 @@ RC DiskBufferPool::allocate_frame(PageNum page_num, Frame **buffer)
     }
 
     LOG_TRACE("frames are all allocated, so we should purge some frames to get one free frame");
-    (void)frame_manager_.purge_frames(1 /*count*/, purger);
+    const int purged = frame_manager_.purge_frames(1 /*count*/, purger);
+    if (purged == 0) {
+      LOG_WARN("failed to allocate frame: all frames are pinned or cannot be flushed");
+      return RC::BUFFERPOOL_NOBUF;
+    }
   }
   return RC::BUFFERPOOL_NOBUF;
 }
@@ -755,6 +795,9 @@ RC DiskBufferPool::load_page(PageNum page_num, Frame *frame)
     return RC::IOERR_READ;
   }
 
+  frame_manager_.stats().record_disk_read();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_READ buffer_pool_id=%d page_num=%d bytes=%d",
+      id(), page_num, BP_PAGE_SIZE);
   frame->set_page_num(page_num);
 
   LOG_DEBUG("Load page %s:%d, file_desc:%d, frame=%s",
@@ -765,15 +808,16 @@ RC DiskBufferPool::load_page(PageNum page_num, Frame *frame)
 int DiskBufferPool::file_desc() const { return file_desc_; }
 
 ////////////////////////////////////////////////////////////////////////////////
-BufferPoolManager::BufferPoolManager(int memory_size /* = 0 */)
+BufferPoolManager::BufferPoolManager(int memory_size /* = 0 */, BufferPoolReplacementPolicy replacement_policy)
+    : frame_manager_("BufPool", replacement_policy)
 {
   if (memory_size <= 0) {
     memory_size = MEM_POOL_ITEM_NUM * DEFAULT_ITEM_NUM_PER_POOL * BP_PAGE_SIZE;
   }
-  const int pool_num = max(memory_size / BP_PAGE_SIZE / DEFAULT_ITEM_NUM_PER_POOL, 1);
-  frame_manager_.init(pool_num);
-  LOG_INFO("buffer pool manager init with memory size %d, page num: %d, pool num: %d",
-           memory_size, pool_num * DEFAULT_ITEM_NUM_PER_POOL, pool_num);
+  const int page_num = max(memory_size / BP_PAGE_SIZE, 1);
+  frame_manager_.init(1, page_num);
+  LOG_INFO("buffer pool manager init with memory size %d, page num: %d, policy: %s",
+      memory_size, page_num, buffer_pool_replacement_policy_name(replacement_policy));
 }
 
 BufferPoolManager::~BufferPoolManager()
@@ -784,6 +828,9 @@ BufferPoolManager::~BufferPoolManager()
   for (auto &iter : tmp_bps) {
     delete iter.second;
   }
+
+  LOG_INFO("[BUFFER_POOL_STATS] policy=%s,%s",
+      buffer_pool_replacement_policy_name(replacement_policy()), stats().to_string().c_str());
 }
 
 RC BufferPoolManager::init(unique_ptr<DoubleWriteBuffer> dblwr_buffer)
@@ -920,4 +967,3 @@ RC BufferPoolManager::get_buffer_pool(int32_t id, DiskBufferPool *&bp)
   bp = iter->second;
   return RC::SUCCESS;
 }
-

@@ -45,6 +45,7 @@ void usage()
   cout << "-t: transaction model. {vacuous(default), mvcc}." << endl;
   cout << "-T: thread handling model. {one-thread-per-connection(default),java-thread-pool}." << endl;
   cout << "-n: buffer pool memory size in byte" << endl;
+  cout << "-r: buffer pool replacement policy. {lru(default), fifo}." << endl;
   cout << "-d: durbility mode. {vacuous(default), disk}" << endl;
   // TODO: support multi dbs(storage/db/db.h) and remove this options
   cout << "-E: storage engine. {heap(default), lsm}" << endl;
@@ -61,7 +62,7 @@ void parse_parameter(int argc, char **argv)
   // Process args
   int          opt;
   extern char *optarg;
-  while ((opt = getopt(argc, argv, "dp:P:s:t:T:f:o:e:E:hn:")) > 0) {
+  while ((opt = getopt(argc, argv, "dp:P:s:t:T:f:o:e:E:hn:r:")) > 0) {
     switch (opt) {
       case 's': process_param->set_unix_socket_path(optarg); break;
       case 'p': process_param->set_server_port(atoi(optarg)); break;
@@ -73,6 +74,7 @@ void parse_parameter(int argc, char **argv)
       case 'E': process_param->set_storage_engine(optarg); break;
       case 'T': process_param->set_thread_handling_name(optarg); break;
       case 'n': process_param->set_buffer_pool_memory_size(atoi(optarg)); break;
+      case 'r': process_param->set_buffer_pool_replacement_policy(optarg); break;
       case 'd': process_param->set_durability_mode("disk"); break;
       case 'h':
         usage();

@@ -52,7 +52,7 @@ MiniDB Baseline v0.1 保留 MiniOB 的分层架构，把三门课程放在同一
                                            |      v
                                            +-- Page (8 KiB)
                                                   |
-                                             pread/pwrite
+                                           lseek + read/write
                                                   |
                                                   v
                                            data/index files
@@ -110,13 +110,14 @@ MiniDB Baseline v0.1 保留 MiniOB 的分层架构，把三门课程放在同一
 
 - `Page` 是固定 8 KiB 的持久化单位，包含 LSN、checksum 和 data。
 - `Frame` 是 Page 的内存容器，附带 frame id、dirty、pin count、latch 和访问时间。
-- `BPFrameManager` 管理所有缓存 Frame，并按访问时间选择可淘汰页（当前实现为 LRU 思路）。
+- `BPFrameManager` 管理所有缓存 Frame，可选择 LRU 或 FIFO，并跳过仍被 pin 的页。
 - `DiskBufferPool` 对应一个磁盘文件，负责页分配、pin/unpin、加载和刷新。
 - `BufferPoolManager` 管理多个 DiskBufferPool。
+- `BufferPoolStats` 汇总命中、缺页、磁盘读写、淘汰、脏页淘汰和刷新次数。
 
 ### Disk / File
 
-`DiskBufferPool::load_page`/`write_page` 最终使用 `pread`/`pwrite` 访问表或索引文件。元数据使用文件流/系统调用写入；CLog 使用独立日志文件。这里是 OS I/O Trace 最自然的边界。
+`DiskBufferPool::load_page`/`write_page` 当前使用 `lseek + read/write` 访问表或索引文件。元数据使用文件流/系统调用写入；CLog 使用独立日志文件。这里是 OS I/O Trace 最自然的边界，也可以在后续实验中与 `pread/pwrite` 方案比较。
 
 ### Transaction、WAL 与 Recovery
 

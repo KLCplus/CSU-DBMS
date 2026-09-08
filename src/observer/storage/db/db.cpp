@@ -49,7 +49,8 @@ Db::~Db()
   LOG_INFO("Db has been closed: %s", name_.c_str());
 }
 
-RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine)
+RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name,
+    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy)
 {
   RC rc = RC::SUCCESS;
 
@@ -83,7 +84,11 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
 
   storage_engine_ = storage_engine;
 
-  buffer_pool_manager_ = make_unique<BufferPoolManager>();
+  BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU;
+  if (!parse_buffer_pool_replacement_policy(buffer_pool_replacement_policy, replacement_policy)) {
+    LOG_WARN("unknown buffer pool replacement policy '%s', fallback to LRU", buffer_pool_replacement_policy);
+  }
+  buffer_pool_manager_ = make_unique<BufferPoolManager>(buffer_pool_memory_size, replacement_policy);
   auto dblwr_buffer    = make_unique<DiskDoubleWriteBuffer>(*buffer_pool_manager_);
 
   const char      *double_write_buffer_filename  = "dblwr.db";

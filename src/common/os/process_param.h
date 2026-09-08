@@ -96,6 +96,15 @@ public:
 
   int buffer_pool_memory_size() const { return buffer_pool_memory_size_; }
 
+  void set_buffer_pool_replacement_policy(const char *policy)
+  {
+    if (policy) {
+      buffer_pool_replacement_policy_ = policy;
+    }
+  }
+
+  const string &buffer_pool_replacement_policy() const { return buffer_pool_replacement_policy_; }
+
   void          set_durability_mode(const char *mode) { durability_mode_ = mode; }
   const string &durability_mode() const { return durability_mode_; }
 
@@ -113,6 +122,7 @@ private:
   string         storage_engine_;
   string         thread_handling_name_;
   int            buffer_pool_memory_size_ = -1;
+  string         buffer_pool_replacement_policy_ = "lru";
   string         durability_mode_;
 };
 

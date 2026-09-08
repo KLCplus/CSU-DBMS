@@ -36,6 +36,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/buffer/frame.h"
 #include "storage/buffer/page.h"
 #include "storage/buffer/buffer_pool_log.h"
+#include "storage/buffer/buffer_pool_stats.h"
 
 class BufferPoolManager;
 class DiskBufferPool;
@@ -88,9 +89,9 @@ struct BPFileHeader
 class BPFrameManager
 {
 public:
-  BPFrameManager(const char *tag);
+  BPFrameManager(const char *tag, BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU);
 
-  RC init(int pool_num);
+  RC init(int pool_num, int item_num_per_pool = DEFAULT_ITEM_NUM_PER_POOL);
   RC cleanup();
 
   /**
@@ -141,6 +142,10 @@ public:
    */
   size_t total_frame_num() const { return allocator_.get_size(); }
 
+  BufferPoolReplacementPolicy replacement_policy() const { return replacement_policy_; }
+  BufferPoolStats            &stats() { return stats_; }
+  const BufferPoolStats      &stats() const { return stats_; }
+
 private:
   Frame *get_internal(const FrameId &frame_id);
   RC     free_internal(const FrameId &frame_id, Frame *frame);
@@ -158,6 +163,8 @@ private:
   mutex          lock_;
   FrameLruCache  frames_;
   FrameAllocator allocator_;
+  BufferPoolReplacementPolicy replacement_policy_;
+  BufferPoolStats              stats_;
 };
 
 /**
@@ -322,7 +329,8 @@ private:
 class BufferPoolManager final
 {
 public:
-  BufferPoolManager(int memory_size = 0);
+  BufferPoolManager(int memory_size = 0,
+      BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU);
   ~BufferPoolManager();
 
   RC init(unique_ptr<DoubleWriteBuffer> dblwr_buffer);
@@ -335,6 +343,9 @@ public:
 
   BPFrameManager    &get_frame_manager() { return frame_manager_; }
   DoubleWriteBuffer *get_dblwr_buffer() { return dblwr_buffer_.get(); }
+  BufferPoolStatsSnapshot stats() const { return frame_manager_.stats().snapshot(); }
+  void reset_stats() { frame_manager_.stats().reset(); }
+  BufferPoolReplacementPolicy replacement_policy() const { return frame_manager_.replacement_policy(); }
 
   /**
    * @brief 根据ID获取对应的BufferPool对象
@@ -345,7 +356,7 @@ public:
   RC get_buffer_pool(int32_t id, DiskBufferPool *&bp);
 
 private:
-  BPFrameManager frame_manager_{"BufPool"};
+  BPFrameManager frame_manager_;
 
   unique_ptr<DoubleWriteBuffer> dblwr_buffer_;
 

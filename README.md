@@ -24,7 +24,7 @@ SQL
   -> Disk / File
 ```
 
-SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本只建立稳定基座，不实现可视化、Trace、新 MVCC、新 WAL 或新的缓存管理器。
+SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本在稳定基座上提供 LRU/FIFO 缓存实验、Buffer Pool 统计和 Page Trace；不实现 GUI、编译过程可视化、新 MVCC 或新 WAL。
 
 ## 2. 当前基座保留的功能
 
@@ -36,6 +36,7 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 - Logical Plan、规则重写、Physical Plan。
 - Pull-based Physical Operator 与 `SqlResult` 驱动的执行。
 - Heap Table、Record/RID、Page/Frame、Buffer Pool 与磁盘文件。
+- 可配置的 LRU/FIFO 页面替换、缓存命中/I/O 统计和结构化 Page Trace。
 - 基本 SQL：`CREATE TABLE`、`INSERT`、`SELECT`、`WHERE`、`DELETE`。
 
 ### Advanced / Reserved
@@ -81,7 +82,7 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 | `unittest/` | Parser、Buffer、Record、B+Tree、Log 等单测 | 模块修改时优先运行 |
 | `benchmark/` | 核心模块性能/并发基准 | Advanced/Reserved |
 | `etc/` | observer 配置 | 启动必需 |
-| `docs/course/` | 本课程架构、语法、源码地图和验收记录 | 新开发者先读 |
+| `docs/course/` | 本课程架构、语法、OS 存储实验、源码地图和验收记录 | 新开发者先读 |
 | `docs/docs/` | MiniOB 上游文档 | 深入时查阅 |
 
 推荐阅读顺序：本 README → `docs/course/architecture.md` → `docs/course/source_map.md` → `sql_task_handler.cpp` → SQL 各 Stage → Table/Record/Buffer。
@@ -207,9 +208,10 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 | 概念 | 真实文件与核心类 | 输入 → 输出 | 适合的扩展点 |
 | --- | --- | --- | --- |
 | Page | `storage/buffer/page.h`：`Page` | 8 KiB 页（LSN、checksum、data） | Page dump/Trace |
-| Frame | `storage/buffer/frame.h/.cpp`：`Frame` | Page + page id + dirty + pin + latch + LRU 时间 | Pin/dirty/LRU 可视化 |
-| Buffer Pool | `storage/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | 命中率、替换策略、页访问事件 |
-| Disk I/O | `disk_buffer_pool.cpp`：`load_page`、`write_page` | `pread/pwrite` 与 Page | OS I/O Trace |
+| Frame | `storage/buffer/frame.h/.cpp`：`Frame` | Page + page id + dirty + pin + latch | Pin/dirty 可视化 |
+| Buffer Pool | `storage/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | LRU/FIFO、命中统计、页访问事件 |
+| Buffer Stats | `storage/buffer/buffer_pool_stats.h/.cpp` | Buffer 事件 → 统计快照 | 实验报告与策略对比 |
+| Disk I/O | `disk_buffer_pool.cpp`：`load_page`、`write_page` | `lseek + read/write` 与 Page | OS I/O Trace；后续可比较 `pread/pwrite` |
 | Record/RID | `storage/record/record.h`、`record_manager.h/.cpp` | 字节记录/RID ↔ record page slot | Record/Page 布局展示 |
 | Record Scan | `heap_record_scanner.cpp` | RecordPage iterator → Record 流 | SeqScan Trace |
 | Table | `storage/table/table.cpp`、`heap_table_engine.cpp` | Value → Record；扫描/写入/索引维护 | 表级统计与访问 Trace |
@@ -230,10 +232,10 @@ TableScanPhysicalOperator::open
   -> DiskBufferPool::get_this_page
   -> BPFrameManager::get/alloc
   -> DiskBufferPool::load_page
-  -> pread(file descriptor, Page)
+  -> lseek + read(file descriptor, Page)
 ```
 
-脏页刷新方向相反：`Frame` → `DiskBufferPool::flush_page_internal/write_page` → Double Write Buffer（disk durability 模式）/`pwrite` → 文件。
+脏页刷新方向相反：`Frame` → `DiskBufferPool::flush_page_internal/write_page` → Double Write Buffer（disk durability 模式）→ `lseek + write` → 文件。
 
 ## 6. 一条 SELECT 的完整执行链
 
@@ -251,7 +253,7 @@ WHERE id = 1;
 6. `execute_stage.cpp` 把物理树放入 `SqlResult`。Communicator 输出结果时调用 `SqlResult::open/next_tuple/close`。
 7. `table_scan_physical_operator.cpp` 通过 `Table::get_record_scanner` 获取 Record，并对下推谓词求值；Project 返回 `name`。
 8. Heap 路径进入 `heap_table_engine.cpp`、`heap_record_scanner.cpp`、`record_manager.cpp`。
-9. Record Page 通过 `DiskBufferPool::get_this_page` 映射到 `Frame`；缓存未命中时 `load_page` 使用 `pread` 从表 `.data` 文件读取 `Page`。
+9. Record Page 通过 `DiskBufferPool::get_this_page` 映射到 `Frame`；缓存未命中时 `load_page` 使用 `lseek + read` 从表 `.data` 文件读取 `Page`。
 
 ## 7. CREATE / INSERT / DELETE 调用入口
 
@@ -302,6 +304,16 @@ cd /tmp/minidb-baseline
 
 本次验证使用同样的 CLI 调用方式和独立 `/tmp` 数据目录。网络模式仍保留，参见 `docs/docs/how_to_run.md`。
 
+OS 缓存实验可指定 Buffer Pool 字节数和替换策略。例如使用 32 个 8 KiB Frame 和 FIFO：
+
+```bash
+/path/to/miniob/build_debug/bin/observer \
+  -f /path/to/miniob/etc/observer.ini -P cli \
+  -n 262144 -r fifo
+```
+
+`-r` 支持 `lru`（默认）和 `fifo`。`observer.log.<日期>` 中的 `[BUFFER_POOL_TRACE]` 是逐事件日志，进程退出时的 `[BUFFER_POOL_STATS]` 是汇总统计。完整实验方法见 `docs/course/os_storage.md`。
+
 ## 11. 基础 SQL Demo
 
 以下语句已在本次构建中实际通过：
@@ -350,9 +362,9 @@ gdb --args build_debug/bin/observer -f etc/observer.ini -P cli
 | AST/Parsed SQL Visualizer | `ParsedSqlNode`/`parse_defs.h` 只读 visitor |
 | Logical Plan Visualizer | `LogicalOperator`、`LogicalPlanGenerator` 输出边界 |
 | EXPLAIN 增强 | `explain_physical_operator.cpp`、`OptimizerUtils` |
-| Buffer Pool/Page Trace | `DiskBufferPool::get_this_page/allocate_page/unpin_page/flush_page` |
-| LRU/FIFO 对比 | `BPFrameManager`；先抽象策略，避免改 Page 格式 |
-| OS I/O Trace | `DiskBufferPool::load_page/write_page` 的 `pread/pwrite` 边界 |
+| Buffer Pool/Page Trace 增强 | `DiskBufferPool::get_this_page/allocate_page/unpin_page/flush_page` |
+| LRU/FIFO 扩展策略 | `BPFrameManager`；保持 Page 格式不变 |
+| OS I/O Trace | `DiskBufferPool::load_page/write_page` 的 `lseek + read/write` 边界 |
 | B+Tree Visualizer | `BplusTreeHandler`、node handler 与 scanner 的只读快照接口 |
 | WAL/Recovery | `LogHandler`、`DiskLogHandler`、`IntegratedLogReplayer` |
 | MVCC | `Trx/TrxKit` 接口与 `MvccTrx`，不要绕开 Table/Record 日志链 |
@@ -364,6 +376,7 @@ gdb --args build_debug/bin/observer -f etc/observer.ini -P cli
 - `docs/course/grammar.md`
 - `docs/course/source_map.md`
 - `docs/course/baseline.md`
+- `docs/course/os_storage.md`
 
 ## License and upstream
 

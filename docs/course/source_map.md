@@ -82,12 +82,13 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `src/observer/storage/buffer/page.h` | 固定 8 KiB Page 布局 | Frame/DiskBufferPool | LSN/checksum/data | OS/DB | P0 | 可视化可读；不可随意改格式 |
 | `src/observer/storage/buffer/frame.h/.cpp` | 内存 Page、dirty、pin、latch、访问时间 | BPFrameManager/Record/B+Tree | Page, mutex/session debug id | OS/DB | P0 | Frame/Pin Trace |
-| `src/observer/storage/buffer/disk_buffer_pool.h/.cpp` | Frame manager、文件页管理、加载/刷新 | Record/B+Tree/Db | pread/pwrite, DoubleWrite, Log | OS/DB | P0 | Buffer Trace、替换策略、I/O Trace |
+| `src/observer/storage/buffer/disk_buffer_pool.h/.cpp` | Frame manager、文件页管理、LRU/FIFO、加载/刷新 | Record/B+Tree/Db | lseek/read/write, DoubleWrite, Log | OS/DB | P0 | Buffer Trace、替换策略、I/O Trace |
+| `src/observer/storage/buffer/buffer_pool_stats.h/.cpp` | 缓存命中、I/O、淘汰与刷新统计 | DiskBufferPool/BPFrameManager | atomic counters | OS | P0 | 实验统计输出 |
 | `src/observer/storage/buffer/double_write_buffer.cpp` | 先写 double-write 文件再落目标页 | DiskBufferPool/Db | file I/O | OS/DB | P2 | 崩溃恢复实验 |
-| `src/common/lang/lru_cache.h` | 通用 LRU 容器 | common/oblsm users | containers | OS | P2 | 策略对比参考；核心 BP 使用访问时间淘汰 |
+| `src/common/lang/lru_cache.h` | 通用有序缓存，支持触碰/不触碰顺序查询 | BPFrameManager/common/oblsm users | containers | OS | P1 | LRU/FIFO 顺序基础 |
 | `src/observer/storage/persist/persist.cpp` | 通用文件持久化辅助 | tests/consumers | open/read/write | OS | P2 | I/O 实验 |
 
-关键路径：`RecordPageHandler` pin Page → `DiskBufferPool::get_this_page` → `BPFrameManager::get/alloc` → miss 时 `load_page`/`pread`；更新后 `Frame::mark_dirty`，最终 `flush_page`/`write_page`/`pwrite`。
+关键路径：`RecordPageHandler` pin Page → `DiskBufferPool::get_this_page` → `BPFrameManager::get/alloc` → miss 时 `load_page`/`lseek + read`；更新后 `Frame::mark_dirty`，最终 `flush_page`/`write_page`/`lseek + write`。
 
 ## 7. Index、Transaction 与 Log（Advanced / Reserved）
 

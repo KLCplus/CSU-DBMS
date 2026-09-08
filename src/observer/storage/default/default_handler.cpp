@@ -30,7 +30,8 @@ DefaultHandler::DefaultHandler() {}
 
 DefaultHandler::~DefaultHandler() noexcept { destroy(); }
 
-RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine)
+RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name,
+    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy)
 {
   // 检查目录是否存在，或者创建
   filesystem::path db_dir(base_dir);
@@ -46,6 +47,8 @@ RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const ch
   trx_kit_name_ = trx_kit_name;
   log_handler_name_ = log_handler_name;
   storage_engine_ = storage_engine;
+  buffer_pool_memory_size_ = buffer_pool_memory_size;
+  buffer_pool_replacement_policy_ = buffer_pool_replacement_policy;
 
   const char *sys_db = "sys";
 
@@ -121,7 +124,13 @@ RC DefaultHandler::open_db(const char *dbname)
   // open db
   Db *db  = new Db();
   RC  ret = RC::SUCCESS;
-  if ((ret = db->init(dbname, dbpath.c_str(), trx_kit_name_.c_str(), log_handler_name_.c_str(), storage_engine_.c_str())) != RC::SUCCESS) {
+  if ((ret = db->init(dbname,
+           dbpath.c_str(),
+           trx_kit_name_.c_str(),
+           log_handler_name_.c_str(),
+           storage_engine_.c_str(),
+           buffer_pool_memory_size_,
+           buffer_pool_replacement_policy_.c_str())) != RC::SUCCESS) {
     LOG_ERROR("Failed to open db: %s. error=%s", dbname, strrc(ret));
     delete db;
   } else {

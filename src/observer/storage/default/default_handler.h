@@ -38,8 +38,11 @@ public:
    * @param base_dir 存储引擎的根目录。所有的数据库相关数据文件都放在这个目录下
    * @param trx_kit_name 使用哪种类型的事务模型
    * @param log_handler_name 使用哪种类型的日志处理器
+   * @param buffer_pool_memory_size Buffer Pool 可使用的页面内存字节数，小于等于0时使用默认值
+   * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo
    */
-  RC   init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine);
+  RC init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine,
+      int buffer_pool_memory_size = 0, const char *buffer_pool_replacement_policy = "lru");
   void destroy();
 
   /**
@@ -97,4 +100,6 @@ private:
   string            log_handler_name_;  ///< 日志处理器的名称
   map<string, Db *> opened_dbs_;        ///< 打开的数据库
   string            storage_engine_;    ///< 存储引擎的名称
+  int               buffer_pool_memory_size_ = 0;
+  string            buffer_pool_replacement_policy_ = "lru";
 };
