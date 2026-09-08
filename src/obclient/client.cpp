@@ -38,7 +38,7 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
-const std::string LINE_HISTORY_FILE = "./.obclient.history";
+const std::string LINE_HISTORY_FILE = "./.csudb_client_history";
 
 int init_unix_sock(const char *unix_sock_path)
 {
@@ -91,12 +91,8 @@ int init_tcp_sock(const char *server_host, int server_port)
 }
 
 const char *startup_tips = R"(
-Welcome to the OceanBase database implementation course.
-
-Copyright (c) 2021 OceanBase and/or its affiliates.
-
-Learn more about OceanBase at https://github.com/oceanbase/oceanbase
-Learn more about MiniOB at https://github.com/oceanbase/miniob
+CSU-DBMS Network Client
+Connect to a running CSU-DBMS server. Type 'exit' or '\q' to leave.
 
 )";
 
@@ -117,7 +113,7 @@ int main(int argc, char *argv[])
     }
   }
 
-  const char *prompt_str = "miniob > ";
+  const char *prompt_str = "csudb-client > ";
 
   int sockfd, send_bytes;
 
