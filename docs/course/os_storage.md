@@ -2,6 +2,23 @@
 
 本文把课程要求与 CSUDB 的高级扩展分开说明。实现继续使用既有磁盘格式和 Record/B+Tree/WAL 主链，没有重新设计 Page、RID 或 Record Page。
 
+## 源码统一入口
+
+操作系统部分现在通过 `src/observer/storage/os/` 形成清晰的学习门面，目录依次为：
+
+```text
+storage/os/
+├── page/          Page / Frame
+├── buffer/        DiskBufferPool / BufferPoolManager
+├── replacement/   LRU / FIFO / CLOCK
+├── io/            PageIOBackend / Linux file I/O
+├── diagnostics/   Stats / Snapshot / Trace
+├── record/        Record / RID / RecordPage bridge
+└── os_storage.h   完整聚合入口
+```
+
+这层门面不复制实现，也没有移动原有核心文件；因此 Table、Record、B+Tree、WAL 和事务模块原有 include 与调用链保持不变。详细阅读顺序见 `src/observer/storage/os/README.md`。
+
 ## 1. 课程要求
 
 Course Core 已覆盖：固定大小页的分配、释放、读写；Record/RID 到 Page 的映射；有限容量缓存；LRU/FIFO；命中与 I/O 统计；页替换日志；正常关闭与重启持久化。
