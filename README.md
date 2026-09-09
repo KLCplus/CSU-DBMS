@@ -9,8 +9,8 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 ```bash
 ./build.sh debug --make -j4
 env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
-  ./build_debug/bin/csudbd --initialize --data-dir /tmp/csudb-data
-./build_debug/bin/csudbd --data-dir /tmp/csudb-data
+  ./build_debug/bin/csudbd --initialize
+./build_debug/bin/csudbd
 ```
 
 另一个终端连接：
@@ -318,8 +318,7 @@ sudo apt install -y build-essential cmake flex bison gdb git
 ```bash
 env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
   build_debug/bin/csudbd --initialize \
-  --config etc/csudb.ini \
-  --data-dir /tmp/csudb-data
+  --config etc/csudb.ini
 ```
 
 启动服务端：
@@ -327,7 +326,6 @@ env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
 ```bash
 build_debug/bin/csudbd \
   --config etc/csudb.ini \
-  --data-dir /tmp/csudb-data \
   --host 127.0.0.1 \
   --port 6789
 ```
@@ -381,7 +379,7 @@ SELECT * FROM student;
 gdb --args build_debug/bin/csudbd --data-dir /tmp/csudb-debug
 ```
 
-默认数据目录是启动工作目录下的 `csudb_data/`；调试时建议始终显式传入独立的 `--data-dir`。
+默认数据目录稳定为 `$XDG_STATE_HOME/csudb`；未设置 XDG 时为 `~/.local/state/csudb`，与启动工作目录无关。`--data-dir` 只用于调试或隔离实验数据。
 
 第一次追 SELECT 建议按顺序在这些位置下断点：
 

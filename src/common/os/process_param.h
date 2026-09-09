@@ -162,7 +162,7 @@ private:
   bool           page_io_backend_specified_ = false;
   string         durability_mode_;
   string         listen_host_ = "127.0.0.1";
-  string         data_dir_ = "csudb_data";
+  string         data_dir_;
   string         log_dir_;
   bool           initialize_ = false;
 };

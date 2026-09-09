@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <arpa/inet.h>
+#include <filesystem>
 
 #include "common/ini_setting.h"
 #include "common/init.h"
@@ -33,7 +34,7 @@ void usage(const char *program)
   cout << "      --initialize           Initialize a new data directory and exit" << endl;
   cout << "      --host HOST            Bind address (default 127.0.0.1)" << endl;
   cout << "  -p, --port PORT            Listen port (default 6789)" << endl;
-  cout << "      --data-dir DIR         Database data directory" << endl;
+  cout << "      --data-dir DIR         Override the stable database data directory" << endl;
   cout << "      --log-dir DIR          Log directory" << endl;
   cout << "      --foreground           Run in foreground (default)" << endl;
   cout << "  -P, --protocol MODE        native, plain, cli, or mysql" << endl;
@@ -45,6 +46,9 @@ void usage(const char *program)
   cout << "      --io-backend BACKEND   legacy or positional" << endl;
   cout << "  -d, --durable              Enable disk durability" << endl;
   cout << "  -E, --engine ENGINE        heap or lsm" << endl;
+  cout << endl;
+  cout << "Default data directory: " << the_process_param()->data_dir() << endl;
+  cout << "Override precedence: --data-dir > CSUDB_DATA_DIR > XDG_STATE_HOME > ~/.local/state/csudb" << endl;
 }
 
 void parse_parameter(int argc, char **argv)
@@ -230,8 +234,9 @@ void print_startup_screen()
   if (strcasecmp(the_process_param()->get_protocol().c_str(), "cli") == 0) {
     cout << "Ready. Enter SQL directly (a trailing ';' is recommended)." << endl;
     cout << "Type 'help;' for SQL examples; type 'exit' or '\\q' to leave." << endl;
-    cout << "Data directory: ./csudb_data/db/sys" << endl << endl;
+    cout << "Data directory: " << the_process_param()->data_dir() << endl << endl;
   } else {
+    cout << "Data directory : " << the_process_param()->data_dir() << endl;
     cout << "CSUDB server is starting. Press Ctrl+C to stop." << endl << endl;
   }
 }
@@ -245,6 +250,19 @@ int main(int argc, char **argv)
   parse_parameter(argc, argv);
 
   print_startup_screen();
+
+#ifdef CSUDB_PRODUCT_SERVER
+  if (!the_process_param()->initialize()) {
+    const std::filesystem::path catalog_path =
+        std::filesystem::path(the_process_param()->data_dir()) / "system" / "catalog.json";
+    if (!std::filesystem::exists(catalog_path)) {
+      cerr << "ERROR: CSUDB data directory is not initialized." << endl
+           << "Data directory: " << the_process_param()->data_dir() << endl
+           << "Run 'csudbd --initialize' once, then start the server with 'csudbd'." << endl;
+      return 1;
+    }
+  }
+#endif
 
   rc = init(the_process_param());
   if (rc != STATUS_SUCCESS) {

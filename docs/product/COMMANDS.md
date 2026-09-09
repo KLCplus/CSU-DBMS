@@ -26,7 +26,7 @@ csudb [DATABASE]
       --version
 ```
 
-Connection setting precedence is CLI > environment > profile > `[default]` > built-in defaults. Supported environment variables are `CSUDB_HOST`, `CSUDB_PORT`, `CSUDB_USER`, `CSUDB_DATABASE`, `CSUDB_PROFILE`, and `CSUDB_CONFIG`. Password environment variables and passwords in profile files are deliberately unsupported.
+Connection setting precedence is CLI > environment > profile > `[default]` > built-in defaults. Supported client environment variables are `CSUDB_HOST`, `CSUDB_PORT`, `CSUDB_USER`, `CSUDB_DATABASE`, `CSUDB_PROFILE`, and `CSUDB_CONFIG`. Password environment variables and passwords in profile files are deliberately unsupported.
 
 `csudb` returns zero for successful batch execution and nonzero for argument, connection, authentication, file, or SQL errors.
 
@@ -55,6 +55,10 @@ csudbd
 ```
 
 The default network protocol is the authenticated native CSUDB protocol, and the default bind address is `127.0.0.1`. `plain`, `cli`, and `mysql` are compatibility/development modes; plain and CLI are trusted local compatibility paths and do not provide product authentication. MySQL protocol support remains experimental.
+
+The server data directory is stable across working directories: `--data-dir` overrides `CSUDB_DATA_DIR`, which overrides `$XDG_STATE_HOME/csudb`, with `~/.local/state/csudb` as the normal fallback. Thus `csudbd --initialize` and every later plain `csudbd` invocation use the same per-user database installation. Runtime state is intentionally separate from installed documentation under `~/.local/share/csudb`.
+
+The product server never creates a catalog during an ordinary `csudbd` start. If the stable directory has not been initialized, it exits with a diagnostic and asks you to run `csudbd --initialize` once. This prevents a typo or a different working directory from silently creating another root account.
 
 For non-interactive lab initialization, `CSUDB_INITIAL_ROOT_PASSWORD` is accepted. Environment variables may be exposed to same-user processes, so production initialization should use a protected environment or rotate the password immediately with `ALTER USER`.
 

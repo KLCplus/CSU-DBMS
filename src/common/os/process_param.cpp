@@ -14,7 +14,33 @@ See the Mulan PSL v2 for more details. */
 
 #include "process_param.h"
 #include <assert.h>
+#include <cstdlib>
+#include <filesystem>
 namespace common {
+
+namespace {
+
+string stable_data_directory()
+{
+  const char *configured = std::getenv("CSUDB_DATA_DIR");
+  if (configured != nullptr && configured[0] != '\0') {
+    return configured;
+  }
+
+  const char *xdg_state_home = std::getenv("XDG_STATE_HOME");
+  if (xdg_state_home != nullptr && xdg_state_home[0] != '\0') {
+    return (std::filesystem::path(xdg_state_home) / "csudb").string();
+  }
+
+  const char *user_home = std::getenv("HOME");
+  if (user_home != nullptr && user_home[0] != '\0') {
+    return (std::filesystem::path(user_home) / ".local" / "state" / "csudb").string();
+  }
+
+  return std::filesystem::absolute("csudb_data").string();
+}
+
+} // namespace
 
 //! Global process config
 ProcessParam *&the_process_param()
@@ -36,6 +62,9 @@ void ProcessParam::init_default(string &process_name)
   }
   if (conf.empty()) {
     conf = "../etc/" + process_name + ".ini";
+  }
+  if (data_dir_.empty()) {
+    data_dir_ = stable_data_directory();
   }
 
   demon = false;
