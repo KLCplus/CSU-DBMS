@@ -419,28 +419,114 @@ void banner(const ClientOptions &options, const Json::Value &login)
  Welcome to the CSUDB monitor.
 
  Commands end with ';' or '\g'.
- Type '\help' for help. Type '\q' to quit.
+ Type '/help' for help. Type '/' then Tab to browse commands.
 
 )";
 }
 
 const char *meta_help = R"(CSUDB shell commands:
-  \help, \?                 Show this help
-  \q, \quit, \exit          Quit
-  \status                    Connection, session, and engine status
-  \connect HOST PORT USER    Reconnect (password is prompted)
-  \use DATABASE              Select database
-  \database                  Show current database
-  \timing [on|off]           Toggle execution timing
-  \clear                     Clear an ANSI terminal
-  \history                   Show session history
-  \source FILE               Execute a SQL file
-  \output [FILE]             Redirect or restore query output
-  \buffer                    Show Buffer Pool summary
-  \pages [N]                 Show at most N frame snapshots (default 20)
-  \server                    Show server status
-  \pager                     Reserved; currently unsupported
+  /help, /?                  Show this help
+  /q, /quit, /exit           Quit
+  /status                    Connection, session, and engine status
+  /connect HOST PORT USER    Reconnect (password is prompted)
+  /use DATABASE              Select database
+  /database                  Show current database
+  /timing [on|off]           Toggle execution timing
+  /clear                     Clear an ANSI terminal
+  /history                   Show session history
+  /source FILE               Execute a SQL file
+  /output [FILE]             Redirect or restore query output
+  /buffer                    Show Buffer Pool summary
+  /pages [N]                 Show at most N frame snapshots (default 20)
+  /server                    Show server status
+  /pager                     Reserved; currently unsupported
+
+Type '/' and press Tab to list commands. Partial names are completed and
+mistyped commands show nearby candidates. Legacy backslash forms still work.
 )";
+
+const vector<string> &meta_command_names()
+{
+  static const vector<string> names = {"/help", "/?", "/q", "/quit", "/exit", "/status", "/connect", "/use",
+      "/database", "/timing", "/clear", "/history", "/source", "/output", "/buffer", "/pages", "/server", "/pager"};
+  return names;
+}
+
+size_t edit_distance(const string &left, const string &right)
+{
+  vector<size_t> previous(right.size() + 1);
+  vector<size_t> current(right.size() + 1);
+  for (size_t column = 0; column <= right.size(); ++column) previous[column] = column;
+  for (size_t row = 1; row <= left.size(); ++row) {
+    current[0] = row;
+    for (size_t column = 1; column <= right.size(); ++column) {
+      const size_t substitution = previous[column - 1] + (left[row - 1] == right[column - 1] ? 0 : 1);
+      current[column] = std::min({previous[column] + 1, current[column - 1] + 1, substitution});
+    }
+    previous.swap(current);
+  }
+  return previous[right.size()];
+}
+
+bool is_subsequence(const string &needle, const string &candidate)
+{
+  size_t position = 0;
+  for (char character : candidate) {
+    if (position < needle.size() && needle[position] == character) ++position;
+  }
+  return position == needle.size();
+}
+
+string normalized_meta_command(string command)
+{
+  std::transform(command.begin(), command.end(), command.begin(), [](unsigned char c) { return std::tolower(c); });
+  if (!command.empty() && command[0] == '\\') command[0] = '/';
+  return command;
+}
+
+vector<string> matching_meta_commands(const string &input, bool include_fuzzy)
+{
+  const string query = normalized_meta_command(input);
+  vector<string> prefix_matches;
+  vector<std::pair<size_t, string>> fuzzy_matches;
+  for (const string &candidate : meta_command_names()) {
+    if (candidate.compare(0, query.size(), query) == 0) {
+      prefix_matches.push_back(candidate);
+      continue;
+    }
+    if (!include_fuzzy || query == "/") continue;
+    size_t distance = edit_distance(query, candidate);
+    if (distance <= 2 || is_subsequence(query, candidate)) fuzzy_matches.emplace_back(distance, candidate);
+  }
+  if (!prefix_matches.empty()) return prefix_matches;
+  std::sort(fuzzy_matches.begin(), fuzzy_matches.end());
+  vector<string> result;
+  for (const auto &match : fuzzy_matches) {
+    result.push_back(match.second);
+    if (result.size() == 4) break;
+  }
+  return result;
+}
+
+replxx::Replxx::completions_t complete_meta_command(const string &input, int &context_length)
+{
+  replxx::Replxx::completions_t completions;
+  if (input.empty() || (input[0] != '/' && input[0] != '\\') || input.find_first_of(" \t\n") != string::npos) return completions;
+  context_length = static_cast<int>(input.size());
+  for (const string &candidate : matching_meta_commands(input, true)) completions.emplace_back(candidate);
+  return completions;
+}
+
+replxx::Replxx::hints_t hint_meta_command(
+    const string &input, int &context_length, replxx::Replxx::Color &color)
+{
+  replxx::Replxx::hints_t hints;
+  if (input.empty() || (input[0] != '/' && input[0] != '\\') || input.find_first_of(" \t\n") != string::npos) return hints;
+  context_length = static_cast<int>(input.size());
+  for (const string &candidate : matching_meta_commands(input, false)) hints.push_back(candidate);
+  if (hints.size() == 1) color = replxx::Replxx::Color::BRIGHTCYAN;
+  return hints;
+}
 
 class Shell
 {
@@ -526,32 +612,32 @@ private:
   {
     std::istringstream stream(line);
     string command; stream >> command;
-    string lower = command; std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
-    if (lower == "\\q" || lower == "\\quit" || lower == "\\exit") { quit = true; return true; }
-    if (lower == "\\help" || lower == "\\?") { output() << meta_help; return true; }
-    if (lower == "\\status" || lower == "\\server") { show_status(false, 0); return true; }
-    if (lower == "\\buffer") { show_status(false, 0); return true; }
-    if (lower == "\\pages") { size_t limit = 20; stream >> limit; show_status(true, std::min<size_t>(limit, 200)); return true; }
-    if (lower == "\\database") { output() << (options_.database.empty() ? "(none)" : options_.database) << '\n'; return true; }
-    if (lower == "\\use") { string database; stream >> database; if (database.empty()) cerr << "Usage: \\use DATABASE\n"; else execute("USE " + database + ";"); return true; }
-    if (lower == "\\timing") {
+    string lower = normalized_meta_command(command);
+    if (lower == "/q" || lower == "/quit" || lower == "/exit") { quit = true; return true; }
+    if (lower == "/help" || lower == "/?") { output() << meta_help; return true; }
+    if (lower == "/status" || lower == "/server") { show_status(false, 0); return true; }
+    if (lower == "/buffer") { show_status(false, 0); return true; }
+    if (lower == "/pages") { size_t limit = 20; stream >> limit; show_status(true, std::min<size_t>(limit, 200)); return true; }
+    if (lower == "/database") { output() << (options_.database.empty() ? "(none)" : options_.database) << '\n'; return true; }
+    if (lower == "/use") { string database; stream >> database; if (database.empty()) cerr << "Usage: /use DATABASE\n"; else execute("USE " + database + ";"); return true; }
+    if (lower == "/timing") {
       string setting; stream >> setting; setting = upper(setting);
-      if (setting == "ON") options_.timing = true; else if (setting == "OFF") options_.timing = false; else if (setting.empty()) options_.timing = !options_.timing; else { cerr << "Usage: \\timing [on|off]\n"; return true; }
+      if (setting == "ON") options_.timing = true; else if (setting == "OFF") options_.timing = false; else if (setting.empty()) options_.timing = !options_.timing; else { cerr << "Usage: /timing [on|off]\n"; return true; }
       output() << "Timing is " << (options_.timing ? "on" : "off") << ".\n"; return true;
     }
-    if (lower == "\\clear") { if (isatty(STDOUT_FILENO)) cout << "\033[2J\033[H"; else cerr << "Unsupported: output is not a terminal.\n"; return true; }
-    if (lower == "\\history") { for (size_t i = 0; i < session_history_.size(); ++i) output() << i + 1 << "  " << session_history_[i] << '\n'; return true; }
-    if (lower == "\\source") { string path; stream >> path; if (path.empty()) cerr << "Usage: \\source FILE\n"; else execute_file(path); return true; }
-    if (lower == "\\output") {
+    if (lower == "/clear") { if (isatty(STDOUT_FILENO)) cout << "\033[2J\033[H"; else cerr << "Unsupported: output is not a terminal.\n"; return true; }
+    if (lower == "/history") { for (size_t i = 0; i < session_history_.size(); ++i) output() << i + 1 << "  " << session_history_[i] << '\n'; return true; }
+    if (lower == "/source") { string path; stream >> path; if (path.empty()) cerr << "Usage: /source FILE\n"; else execute_file(path); return true; }
+    if (lower == "/output") {
       string path; stream >> path;
       if (path.empty()) { output_file_.close(); cout << "Query output restored to stdout.\n"; }
       else { output_file_.close(); output_file_.open(path, std::ios::app); if (!output_file_) cerr << "ERROR: cannot open output file\n"; }
       return true;
     }
-    if (lower == "\\pager") { cerr << "Unsupported: pager is reserved for a future release.\n"; return true; }
-    if (lower == "\\connect") {
+    if (lower == "/pager") { cerr << "Unsupported: pager is reserved for a future release.\n"; return true; }
+    if (lower == "/connect") {
       string host, user; int port = DEFAULT_PORT; stream >> host >> port >> user;
-      if (host.empty() || user.empty()) { cerr << "Usage: \\connect HOST PORT USER\n"; return true; }
+      if (host.empty() || user.empty()) { cerr << "Usage: /connect HOST PORT USER\n"; return true; }
       string password = read_password(), error;
       NativeConnection replacement;
       if (!replacement.connect_to(host, port, error)) { cerr << "ERROR: cannot connect: " << error << '\n'; return true; }
@@ -559,7 +645,14 @@ private:
       if (!replacement.request(req, resp, error) || !resp.get("success", false).asBool()) { cerr << "ERROR: authentication failed\n"; return true; }
       connection_ = std::move(replacement); options_.host = host; options_.port = port; options_.user = user; options_.database = "sys"; return true;
     }
-    cerr << "Unknown command '" << command << "'. Type \\help.\n";
+    cerr << "Unknown command '" << command << "'.";
+    vector<string> suggestions = matching_meta_commands(lower, true);
+    if (!suggestions.empty()) {
+      cerr << " Did you mean ";
+      for (size_t i = 0; i < suggestions.size(); ++i) cerr << (i == 0 ? "" : ", ") << suggestions[i];
+      cerr << '?';
+    }
+    cerr << " Type /help.\n";
     return true;
   }
 
@@ -568,21 +661,27 @@ private:
     string config_dir = home_directory() + "/.csudb";
     std::error_code ec; std::filesystem::create_directories(config_dir, ec); chmod(config_dir.c_str(), S_IRWXU);
     string history_path = config_dir + "/history";
-    common::MiniobLineReader::instance().init(history_path);
+    common::MiniobLineReader &line_reader = common::MiniobLineReader::instance();
+    line_reader.init(history_path);
+    line_reader.set_completion_callback(complete_meta_command);
+    line_reader.set_hint_callback(hint_meta_command);
     bool quit = false;
     string sql;
     while (!quit) {
       string prompt = sql.empty() ? "csudb [" + (options_.database.empty() ? "(none)" : options_.database) + "]> " : "    -> ";
-      string line = common::MiniobLineReader::instance().my_readline(prompt, false);
-      if (common::MiniobLineReader::instance().eof()) break;
+      string line = line_reader.my_readline(prompt, false);
+      if (line_reader.eof()) break;
       if (line == "interrupted") { sql.clear(); cout << "^C\n"; continue; }
-      if (sql.empty() && !trim(line).empty() && trim(line)[0] == '\\') { dispatch_meta(trim(line), quit); continue; }
+      if (sql.empty() && !trim(line).empty() && (trim(line)[0] == '/' || trim(line)[0] == '\\')) {
+        dispatch_meta(trim(line), quit);
+        continue;
+      }
       if (trim(line).empty()) continue;
       if (!sql.empty()) sql.push_back('\n');
       sql += line;
       if (!complete_sql(sql)) continue;
       string history_entry = trim(sql);
-      if (!sensitive_sql(history_entry)) { common::MiniobLineReader::instance().add_history(history_entry); session_history_.push_back(history_entry); }
+      if (!sensitive_sql(history_entry)) { line_reader.add_history(history_entry); session_history_.push_back(history_entry); }
       execute(sql);
       sql.clear();
     }

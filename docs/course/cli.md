@@ -7,12 +7,11 @@ CSUDB 是客户端/服务端数据库。`csudbd` 负责 SQL、Session、Catalog�
 ```bash
 ./build.sh debug --make -j4
 
-env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
-  build_debug/bin/csudbd --initialize \
+build_debug/bin/csudbd --initialize \
   --config etc/csudb.ini
 ```
 
-初始化只执行一次。密码不会明文写入 Catalog；示例环境变量适合受控实验，使用后应通过 `ALTER USER` 更换。
+初始化只执行一次。服务端会关闭密码回显，要求输入并确认至少 8 位的 Root 密码。密码不会明文写入 Catalog。
 
 ## 2. 启动 Server
 
@@ -62,12 +61,14 @@ SELECT * FROM student;
 
 ## 5. Shell 常用功能
 
-- `\help`：显示全部已实现 Meta Command。
-- `\status`、`\server`：查看真实服务端/Session 配置。
-- `\buffer`、`\pages 20`：读取稳定 Buffer Pool Snapshot DTO。
-- `\timing on`：显示耗时。
-- `\source init.sql`、`\output result.txt`：执行脚本和重定向。
-- `\q`：退出。
+- `/help`：显示全部已实现 Meta Command。
+- `/status`、`/server`：查看真实服务端/Session 配置。
+- `/buffer`、`/pages 20`：读取稳定 Buffer Pool Snapshot DTO。
+- `/timing on`：显示耗时。
+- `/source init.sql`、`/output result.txt`：执行脚本和重定向。
+- `/quit`：退出。
+
+在空输入行键入 `/` 并按 Tab 可列出候选；输入命令前缀可补全，拼写错误时会显示相近命令。旧的 `\` 命令仅作为兼容别名保留。
 
 批处理与脚本：
 
