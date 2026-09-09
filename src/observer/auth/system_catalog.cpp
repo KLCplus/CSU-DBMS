@@ -50,17 +50,6 @@ bool hex_decode(const string &input, vector<unsigned char> &output)
   return true;
 }
 
-string random_password()
-{
-  static const char alphabet[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
-  unsigned char bytes[20];
-  if (RAND_bytes(bytes, sizeof(bytes)) != 1) return "";
-  string password;
-  password.reserve(sizeof(bytes));
-  for (unsigned char byte : bytes) password.push_back(alphabet[byte % (sizeof(alphabet) - 1)]);
-  return password;
-}
-
 bool contains(const vector<string> &items, const string &value)
 {
   return std::find(items.begin(), items.end(), value) != items.end();
@@ -95,6 +84,7 @@ RC SystemCatalog::set_password_unlocked(UserRecord &user, const string &password
 
 RC SystemCatalog::initialize_new(const string &data_dir, const string &root_password, string &effective_root_password)
 {
+  if (root_password.empty()) return RC::INVALID_ARGUMENT;
   std::lock_guard<std::mutex> guard(mutex_);
   data_dir_ = data_dir;
   catalog_path_ = (std::filesystem::path(data_dir_) / "system" / "catalog.json").string();
@@ -102,8 +92,7 @@ RC SystemCatalog::initialize_new(const string &data_dir, const string &root_pass
   std::error_code ec;
   std::filesystem::create_directories(std::filesystem::path(catalog_path_).parent_path(), ec);
   if (ec) return RC::IOERR_WRITE;
-  effective_root_password = root_password.empty() ? random_password() : root_password;
-  if (effective_root_password.empty()) return RC::INTERNAL;
+  effective_root_password = root_password;
   UserRecord root;
   root.id = next_user_id_++;
   root.username = "root";

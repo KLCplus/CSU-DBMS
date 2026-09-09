@@ -69,6 +69,22 @@ void MiniobLineReader::add_history(const std::string &line)
   check_and_save_history();
 }
 
+void MiniobLineReader::set_completion_callback(const replxx::Replxx::completion_callback_t &callback)
+{
+  reader_.set_completion_callback(callback);
+  reader_.set_complete_on_empty(true);
+  reader_.set_double_tab_completion(false);
+  reader_.set_beep_on_ambiguous_completion(false);
+  reader_.set_completion_count_cutoff(32);
+}
+
+void MiniobLineReader::set_hint_callback(const replxx::Replxx::hint_callback_t &callback)
+{
+  reader_.set_hint_callback(callback);
+  reader_.set_max_hint_rows(4);
+  reader_.set_hint_delay(100);
+}
+
 bool MiniobLineReader::is_exit_command(const std::string &cmd)
 {
   std::string lower_cmd = cmd;
