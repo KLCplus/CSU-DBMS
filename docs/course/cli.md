@@ -9,8 +9,7 @@ CSUDB 是客户端/服务端数据库。`csudbd` 负责 SQL、Session、Catalog�
 
 env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
   build_debug/bin/csudbd --initialize \
-  --config etc/csudb.ini \
-  --data-dir /tmp/csudb-course
+  --config etc/csudb.ini
 ```
 
 初始化只执行一次。密码不会明文写入 Catalog；示例环境变量适合受控实验，使用后应通过 `ALTER USER` 更换。
@@ -20,12 +19,11 @@ env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
 ```bash
 build_debug/bin/csudbd \
   --config etc/csudb.ini \
-  --data-dir /tmp/csudb-course \
   --host 127.0.0.1 \
   --port 6789
 ```
 
-服务端默认绑定 `127.0.0.1`，默认协议是需要登录的 CSUDB native protocol。按 Ctrl+C 触发优雅退出。缓存实验参数也在服务端设置：
+服务端默认绑定 `127.0.0.1`，默认协议是需要登录的 CSUDB native protocol。默认数据固定在 `~/.local/state/csudb`（或 `$XDG_STATE_HOME/csudb`），因此从任何目录执行 `csudbd` 都连接同一套数据。按 Ctrl+C 触发优雅退出。缓存实验参数也在服务端设置：
 
 ```bash
 build_debug/bin/csudbd --data-dir /tmp/csudb-course \
