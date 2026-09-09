@@ -32,7 +32,7 @@ The audit was produced from `lex_sql.l`, `yacc_sql.y`, `StmtType`, `Stmt::create
 | GRANT | NO | YES | YES | Small GLOBAL/DATABASE/TABLE privilege model |
 | REVOKE | NO | YES | YES | Central catalog update |
 | SHOW GRANTS | NO | YES | YES | Self or GRANT privilege |
-| SELECT DATABASE() | NO | NO | NO | Use `\database` |
+| SELECT DATABASE() | NO | NO | NO | Use `/database` |
 | JOIN keyword | NO | NO | NO | Comma-separated table sources exist; keyword does not |
 | ORDER BY | NO | NO | NO | No production in the audited grammar |
 | OR / unary NOT | NO | NO | NO | AND condition list exists; no OR/NOT production |

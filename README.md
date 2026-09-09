@@ -8,8 +8,7 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 
 ```bash
 ./build.sh debug --make -j4
-env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
-  ./build_debug/bin/csudbd --initialize
+./build_debug/bin/csudbd --initialize
 ./build_debug/bin/csudbd
 ```
 
@@ -316,8 +315,7 @@ sudo apt install -y build-essential cmake flex bison gdb git
 首次创建数据目录（示例密码仅用于本地实验）：
 
 ```bash
-env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
-  build_debug/bin/csudbd --initialize \
+build_debug/bin/csudbd --initialize \
   --config etc/csudb.ini
 ```
 
@@ -336,7 +334,7 @@ build_debug/bin/csudbd \
 build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
 ```
 
-连接后显示 CSUDB 2026 欢迎页和 `csudb [sys]>` 提示符。SQL 支持多行输入，以字符串外的 `;` 或 `\g` 提交；输入 `\help` 查看 Shell 命令，输入 `\q` 退出。
+连接后显示 CSUDB 2026 欢迎页和 `csudb [sys]>` 提示符。SQL 支持多行输入，以字符串外的 `;` 或 `\g` 提交；输入 `/` 后按 Tab 浏览命令，输入 `/help` 查看帮助，输入 `/quit` 退出。命令支持前缀补全和拼写候选。
 
 OS 缓存实验参数属于服务端。例如 32 个 8 KiB Frame、CLOCK 和 positional I/O：
 
