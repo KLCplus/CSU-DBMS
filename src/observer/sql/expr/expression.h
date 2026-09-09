@@ -118,6 +118,17 @@ public:
   virtual void        set_name(string name) { name_ = name; }
 
   /**
+   * @brief 表达式在原始 SQL 中出现的位置（行列号），用于语义错误的定位
+   */
+  int  line() const { return line_; }
+  int  column() const { return column_; }
+  void set_location(int line, int column)
+  {
+    line_   = line;
+    column_ = column;
+  }
+
+  /**
    * @brief 表达式在下层算子返回的 chunk 中的位置
    */
   virtual int  pos() const { return pos_; }
@@ -139,6 +150,9 @@ protected:
 
 private:
   string name_;
+
+  int line_   = 0;  ///< 表达式在原始 SQL 中的起始行号
+  int column_ = 0;  ///< 表达式在原始 SQL 中的起始列号
 };
 
 class StarExpr : public Expression
