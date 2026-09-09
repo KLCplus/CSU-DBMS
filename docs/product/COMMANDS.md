@@ -1,0 +1,139 @@
+# CSUDB 2026 Command Reference
+
+This document lists commands implemented by the current tree. Items not implemented are kept out of the supported sections and appear under **Planned**.
+
+For a step-by-step Chinese guide covering first-time initialization, daily startup, login, backup, and troubleshooting, read `USER_GUIDE.md` first.
+
+## Client shell commands
+
+```text
+csudb [DATABASE]
+  -h, --host HOST
+  -P, --port PORT
+  -u, --user USER
+  -p, --password              securely prompt; no password argument is accepted
+  -D, --database DATABASE
+      --profile NAME
+      --config FILE
+  -e, --execute SQL
+  -f, --file FILE
+      --batch
+      --silent
+      --table
+      --no-color
+      --ping
+      --help
+      --version
+```
+
+Connection setting precedence is CLI > environment > profile > `[default]` > built-in defaults. Supported environment variables are `CSUDB_HOST`, `CSUDB_PORT`, `CSUDB_USER`, `CSUDB_DATABASE`, `CSUDB_PROFILE`, and `CSUDB_CONFIG`. Password environment variables and passwords in profile files are deliberately unsupported.
+
+`csudb` returns zero for successful batch execution and nonzero for argument, connection, authentication, file, or SQL errors.
+
+## Server commands
+
+```text
+csudbd
+  -h, --help
+  -v, --version
+  -f, --config FILE
+      --initialize
+      --host IPv4_ADDRESS
+  -p, --port PORT
+      --data-dir DIR
+      --log-dir DIR
+      --foreground
+  -P, --protocol native|plain|cli|mysql
+  -s, --socket PATH
+  -t, --transaction vacuous|mvcc
+  -T, --threads MODEL
+  -n, --buffer-size BYTES
+  -r, --replacement lru|fifo|clock
+      --io-backend legacy|positional
+  -d, --durable
+  -E, --engine heap|lsm
+```
+
+The default network protocol is the authenticated native CSUDB protocol, and the default bind address is `127.0.0.1`. `plain`, `cli`, and `mysql` are compatibility/development modes; plain and CLI are trusted local compatibility paths and do not provide product authentication. MySQL protocol support remains experimental.
+
+For non-interactive lab initialization, `CSUDB_INITIAL_ROOT_PASSWORD` is accepted. Environment variables may be exposed to same-user processes, so production initialization should use a protected environment or rotate the password immediately with `ALTER USER`.
+
+## Meta commands
+
+Meta commands execute in the client and do not pass through the SQL parser.
+
+| Command | Description |
+| --- | --- |
+| `\help`, `\?` | Show the built-in command reference |
+| `\q`, `\quit`, `\exit` | Exit |
+| `\status` | Show connection, session, server, and buffer settings actually reported by the server |
+| `\connect HOST PORT USER` | Close the current connection, prompt for a password, and reconnect |
+| `\use DATABASE` | Select a database through the service command `USE` |
+| `\database` | Print the client’s current database |
+| `\timing [on|off]` | Toggle query timing |
+| `\clear` | Clear an interactive terminal |
+| `\history` | Show the in-memory history for this shell |
+| `\source FILE` | Execute a local SQL file |
+| `\output [FILE]` | Redirect query output; omit the file to restore stdout |
+| `\buffer` | Show the stable Buffer Pool summary DTO |
+| `\pages [N]` | Show at most N frame snapshots (default 20) |
+| `\server` | Show server status |
+| `\pager` | Explicitly reports unsupported in this version |
+
+SQL input may span multiple lines. A semicolon or `\g` outside a quoted string submits it. `Ctrl+D` exits; `Ctrl+C` cancels the current line through the line-reader integration.
+
+## Database SQL
+
+```sql
+SHOW DATABASES;
+CREATE DATABASE [IF NOT EXISTS] name;
+DROP DATABASE [IF EXISTS] name;
+USE name;
+```
+
+The internally opened `sys` database is the default session database. `SELECT DATABASE()` is planned; use `\database` meanwhile.
+
+## Table and metadata SQL
+
+Supported:
+
+```text
+CREATE TABLE ...
+SHOW TABLES;
+DESC table;
+CREATE [UNIQUE] INDEX ... ON ...;
+ANALYZE TABLE table;
+EXPLAIN statement;
+```
+
+Parsed but not executable in the current core and therefore not advertised as supported: `DROP TABLE`, `DROP INDEX`, `SYNC`, and `UPDATE`.
+
+## DML and query syntax
+
+Supported core commands are `INSERT`, `SELECT`, and `DELETE`, including comparison expressions and the currently implemented aggregate and `GROUP BY` paths. The current grammar supports comma-separated table sources; it does not contain `JOIN`, `ORDER BY`, `OR`, or unary `NOT` productions. `INSERT` accepts one value tuple per statement and does not accept an explicit target-column list.
+
+## User and authorization SQL
+
+```sql
+CREATE USER 'alice' IDENTIFIED BY 'password';
+ALTER USER 'alice' IDENTIFIED BY 'new-password';
+DROP USER 'alice';
+SHOW USERS;
+
+GRANT ALL ON DATABASE school TO 'alice';
+GRANT SELECT, INSERT ON school.student TO 'alice';
+REVOKE INSERT ON school.student FROM 'alice';
+SHOW GRANTS FOR 'alice';
+```
+
+Privileges are `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `CREATE`, `DROP`, `CREATE_USER`, and `GRANT`, scoped to GLOBAL, DATABASE, or TABLE. Root owns all privileges. A database/table grant implies permission to connect to that database. Authorization is default-deny for authenticated non-root users.
+
+Passwords use salted PBKDF2-HMAC-SHA256 with 210,000 iterations and are never stored as plaintext. Authentication failure intentionally does not reveal whether the account exists.
+
+## Transaction and administrative SQL
+
+The current SQL engine supports `BEGIN`, `COMMIT`, `ROLLBACK`, `SET`, `HELP`, and `LOAD DATA`. Transaction semantics depend on the configured transaction kit.
+
+## Planned
+
+`SELECT DATABASE()`, `DESCRIBE` alias, executable DROP TABLE/INDEX, executable UPDATE, OR/NOT/ORDER BY/JOIN grammar, pager integration, TLS, roles, prepared statements, HTTP/JDBC/SDK front ends, and full MySQL compatibility are not claimed by this version.

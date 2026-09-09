@@ -173,7 +173,7 @@ ctest --output-on-failure -j4
 
 按课程仓库维护方要求删除根目录 `CODE_OF_CONDUCT.md` 和 `CONTRIBUTING.md`，它们不参与编译或运行。
 
-`License` 与 `NOTICE` 已在 CSU-DBMS CLI 整理阶段恢复。公开分发派生代码时必须提供许可证副本并保留原有版权、专利、商标及免责声明；产品界面无需使用上游品牌。
+公开分发派生代码时必须满足适用的开源许可义务并保留源文件版权声明与 `NOTICE`；产品界面无需使用上游品牌。
 
 ### Not removed
 
@@ -244,3 +244,38 @@ ctest --test-dir build_debug --output-on-failure
 结果为 47 项中 45 项通过（96%）。失败项仍是历史基线已记录的 `bplus_tree_log_test` 并发 pin-count 断言和 `mvcc_trx_log_test` ASAN use-after-free/提交断言；`buffer_pool_os_test` 通过。本次没有修改对应 Advanced/Reserved 核心实现。
 
 品牌边界：所有正式 SQL、网络和 LSM CLI 的欢迎语、提示符、历史文件和默认数据/日志路径均已切换为 CSU-DBMS。源码中的 `MiniobLineReader`、`observer` 静态库名、`oceanbase` namespace 等内部兼容标识暂不进行大规模重命名，以免破坏 ABI 和成熟核心；上游版权头、`License`、`NOTICE` 因开源许可要求必须保留。
+
+## 13. OS / Storage phase two verification (2026-09-08)
+
+开发基点：`main` 分支，开始时 HEAD 为 `6dbe0b0`。实测环境为 Ubuntu 24.04.4 LTS、Linux 7.0.0、G++ 13.3.0、CMake 3.28.3；Debug 构建保持 C++20 与 ASAN 的仓库既有配置。
+
+实际命令：
+
+```bash
+./build.sh debug --make -j4
+./build_debug/unittest/buffer_pool_os_test
+./build_debug/bin/csudbd --config etc/csudb.ini --data-dir /tmp/csudb-os-lab \
+  --replacement clock --io-backend positional
+```
+
+结果：Debug 全目标构建成功；OS 专项 6/6 通过；CLOCK+positional 下 CREATE/两次 INSERT/SELECT/WHERE/DELETE/再次 SELECT 全部成功。退出后以 positional 重启、LRU+legacy 重启和 FIFO+legacy 重启，均读取到删除后持久化结果 `2 | Bob`。
+
+本阶段新增 ReplacementPolicy、CLOCK、PageIOBackend、positional pread/pwrite、增强 Stats、Snapshot DTO、生命周期 Trace、FlushReason、安全批量 dirty flush 与 pin/no-buffer 诊断。Page 仍为 8192 bytes，Record/RID/Page/file header 格式均未改变；SQL Compiler、RecordManager、B+Tree、MVCC、WAL 和 Double Write 协议未修改。
+
+当前限制：淘汰时的既有 FrameManager 大锁和每文件 `wr_lock_` 仍保留；没有 background cleaner、mmap、O_DIRECT、异步预取或异步写回。`bplus_tree_log_test` 与 `mvcc_trx_log_test` 的既有 Baseline 问题不在本阶段处理范围。
+
+## 14. CSUDB 2026 product-shell verification (2026-09-09)
+
+实际执行 `./build.sh debug --make -j4` 成功，正式产物为 `build_debug/bin/csudb` 与 `build_debug/bin/csudbd`。在隔离 data-dir 中完成 `--initialize`、native login、CREATE DATABASE、USE、CREATE TABLE、两次 INSERT、SELECT、WHERE、DELETE、再次 SELECT、CREATE/ALTER/DROP USER、GRANT、拒绝未授权 INSERT、重启后再次登录和查询。重启后仍得到 `2 | Bob`，用户与 TABLE SELECT grant 同样保持。
+
+服务端实际接受并启动 LRU+legacy、FIFO+positional、CLOCK+positional。`buffer_pool_os_test` 为 6/6 通过。Catalog 权限实测为 `0600`，密码只保存随机 Salt 与 PBKDF2-HMAC-SHA256 派生值。
+
+安装实测命令：
+
+```bash
+CSUDB_BUILD_DIR="$PWD/build_debug" \
+CSUDB_INSTALL_PREFIX=/tmp/csudb-install \
+./scripts/install.sh --user
+```
+
+从仓库外执行已安装的 `csudb --version`、`csudbd --version` 与 `csudb --ping` 均成功。安装集合仅含两个产品命令、product docs、示例配置和 bash completion；卸载脚本验证未删除数据库 data-dir。

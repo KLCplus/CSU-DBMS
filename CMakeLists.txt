@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 set(CMAKE_CXX_STANDARD 20)
 
-project(csudb)
+project(csudb VERSION 2026.1.0)
 
 MESSAGE(STATUS "This is Project source dir " ${PROJECT_SOURCE_DIR})
 MESSAGE(STATUS "This is PROJECT_BINARY_DIR dir " ${PROJECT_BINARY_DIR})
@@ -179,6 +179,10 @@ FIND_PACKAGE(replxx REQUIRED)
 # ADD_SUBDIRECTORY(deps)
 ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(tools)
+
+INSTALL(DIRECTORY docs/product DESTINATION share/csudb/docs)
+INSTALL(FILES etc/csudb.ini etc/csudb-client.toml DESTINATION share/csudb/examples)
+INSTALL(FILES scripts/completion/csudb.bash DESTINATION share/bash-completion/completions RENAME csudb)
 
 IF (WITH_BENCHMARK)
     ADD_SUBDIRECTORY(benchmark)

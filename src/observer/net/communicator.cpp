@@ -16,8 +16,10 @@ See the Mulan PSL v2 for more details. */
 #include "net/buffered_writer.h"
 #include "net/cli_communicator.h"
 #include "net/mysql_communicator.h"
+#include "net/native_communicator.h"
 #include "net/plain_communicator.h"
 #include "session/session.h"
+#include "service/query_result.h"
 
 #include "common/lang/mutex.h"
 
@@ -27,7 +29,14 @@ RC Communicator::init(int fd, unique_ptr<Session> session, const string &addr)
   session_ = std::move(session);
   addr_    = addr;
   writer_  = new BufferedWriter(fd_);
+  session_->set_client_address(addr);
   return RC::SUCCESS;
+}
+
+RC Communicator::write_query_result(const QueryResult &, bool &need_disconnect)
+{
+  need_disconnect = false;
+  return RC::UNIMPLEMENTED;
 }
 
 Communicator::~Communicator()
@@ -48,6 +57,9 @@ Communicator::~Communicator()
 Communicator *CommunicatorFactory::create(CommunicateProtocol protocol)
 {
   switch (protocol) {
+    case CommunicateProtocol::NATIVE: {
+      return new NativeCommunicator;
+    } break;
     case CommunicateProtocol::PLAIN: {
       return new PlainCommunicator;
     } break;

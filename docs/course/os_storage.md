@@ -1,20 +1,32 @@
-# OS Page and Buffer Pool Lab
+# OS Page and Buffer Pool
 
-## 1. 实验目标
+本文把课程要求与 CSUDB 的高级扩展分开说明。实现继续使用既有磁盘格式和 Record/B+Tree/WAL 主链，没有重新设计 Page、RID 或 Record Page。
 
-本实验直接复用 MiniOB 的 Page、Frame、Record Page 和 DiskBufferPool，不重新设计磁盘格式。完成的课程要求包括：
+## 1. 课程要求
 
-- 固定大小页的分配、释放、读取和写回；
-- 数据表、Record、RID 与 Page 的映射；
-- 有限容量页缓存；
-- LRU/FIFO 替换策略切换；
-- 缓存命中率、磁盘 I/O 与淘汰统计；
-- 页访问、替换和脏页刷新日志；
-- 数据正常关闭、重启后的持久化验证。
+Course Core 已覆盖：固定大小页的分配、释放、读写；Record/RID 到 Page 的映射；有限容量缓存；LRU/FIFO；命中与 I/O 统计；页替换日志；正常关闭与重启持久化。
 
-## 2. 页式存储模型
+本阶段 Advanced Extensions 包括：可插拔替换策略、CLOCK、可替换 Page I/O 后端、positional I/O、状态快照、生命周期 Trace、Flush 原因、安全批量脏页刷新和 pin starvation 诊断。
 
-`src/observer/storage/buffer/page.h` 定义固定 8 KiB Page：
+## 2. 当前实现
+
+```text
+Table / Index
+  -> RecordFileHandler / RecordPageHandler
+  -> DiskBufferPool
+  -> BPFrameManager
+       -> ReplacementPolicy (LRU / FIFO / CLOCK)
+  -> Frame -> Page (8192 bytes)
+  -> PageIOBackend (legacy / positional)
+  -> Linux VFS / file system
+  -> Disk / SSD
+```
+
+目标分页文件的 I/O 必须经过 `DiskBufferPool`，Executor、Table 和 RecordManager 没有新增绕过 Buffer Pool 的路径。WAL 与 Double Write Buffer 仍执行原有职责，其文件 I/O 不计入目标分页文件的 `disk_reads/disk_writes`。
+
+## 3. Page / Frame 模型
+
+`src/observer/storage/buffer/page.h` 定义 `BP_PAGE_SIZE = 8192`：
 
 ```text
 Page (8192 bytes)
@@ -27,155 +39,177 @@ Page (8192 bytes)
 +------------------+
 ```
 
-8 KiB 是当前 MiniOB 磁盘格式的一部分。指导书中的 4 KiB 是示例，本实验不修改页大小。
+8 KiB 是磁盘格式的一部分，本阶段没有修改 Page header、file header page、allocation bitmap 或 checksum 范围。
 
-页面由 `(buffer_pool_id, page_num)` 唯一标识。`DiskBufferPool` 对应一个分页文件，文件第 0 页保存页数、已分配页数和分配 bitmap。核心接口为：
+`Frame` 是 Page 的内存容器，持有 `FrameId(buffer_pool_id, page_num)`、dirty、原子 pin count、latch 和最后访问时间。pin count 大于 0 的 Frame 永远不会被替换策略选为 victim。
+
+## 4. Record / RID → Page
+
+Heap Record 由 `RID(page_num, slot_num)` 定位：
+
+```text
+RecordFileHandler
+  -> RecordPageHandler
+  -> RID(page_num, slot_num)
+  -> Record Page header + slot bitmap + fixed-size slots
+  -> DiskBufferPool::get_this_page
+```
+
+核心代码是 `storage/record/record.h`、`record_manager.h/.cpp` 和 `heap_record_scanner.cpp`。本阶段没有修改记录布局、RID 格式或扫描语义。
+
+## 5. Buffer Pool
+
+`BufferPoolManager` 管理一个数据库中的多个 `DiskBufferPool`；表数据文件和索引文件共享 `BPFrameManager` 的容量与替换策略。核心接口：
 
 | 操作 | 接口 |
 | --- | --- |
-| 获取页 | `DiskBufferPool::get_this_page` |
-| 分配页 | `DiskBufferPool::allocate_page` |
-| 释放页 | `DiskBufferPool::dispose_page` |
-| 解除驻留 | `DiskBufferPool::unpin_page` |
-| 刷新页 | `DiskBufferPool::flush_page` |
-| 加载页 | `DiskBufferPool::load_page` |
-| 写回页 | `DiskBufferPool::write_page` |
+| 获取/Pin | `DiskBufferPool::get_this_page` |
+| Unpin | `DiskBufferPool::unpin_page` |
+| 分配/释放 | `allocate_page` / `dispose_page` |
+| 单页刷新 | `flush_page` |
+| 安全批量刷新 | `flush_dirty_pages` |
+| 诊断快照 | `BufferPoolManager::snapshot` / `DiskBufferPool::snapshot` |
 
-磁盘 I/O 当前使用 `lseek + read/write`，完整读写由 `src/common/io/io.cpp` 的 `readn/writen` 保证。
+容量由 `--buffer-size BYTES` 配置，实际 Frame 数至少为 1，按 `BYTES / 8192` 计算。未设置或小于等于 0 时使用既有默认容量。
 
-## 3. Record 与 Page 映射
+## 6. Replacement Policy Architecture
 
-Heap Table 的一条记录由 `RID(page_num, slot_num)` 定位。Record Page 布局为：
-
-```text
-+------------+----------------+----------------------------+
-| PageHeader | slot bitmap    | fixed-size record slots    |
-+------------+----------------+----------------------------+
-```
-
-`RecordFileHandler` 管理整个表文件，`RecordPageHandler` 管理单页记录，`HeapRecordScanner` 逐页、逐 slot 扫描。插入优先选择 `free_pages_` 中未满页面，没有可用页面时调用 `allocate_page` 扩展文件。删除清理 slot bitmap，并把页面重新加入候选空闲页集合。
-
-## 4. Buffer Pool
-
-`Page` 是持久化内容，`Frame` 是其内存容器。Frame 额外维护：
-
-- `FrameId`；
-- dirty 标记；
-- pin count；
-- 读写 latch；
-- Page 内容。
-
-页面使用期间 pin count 大于 0，替换器只能选择 pin count 为 0 的 Frame。如果所有 Frame 都被 pin，系统返回 `RC::BUFFERPOOL_NOBUF`，不会无限等待。
-
-Buffer Pool 默认容量约 20 MiB。可通过 observer 参数按字节配置：
-
-```bash
-observer -n 262144
-```
-
-上例提供 `262144 / 8192 = 32` 个 Frame。容量包括同一数据库内表、索引等分页文件的缓存 Frame 及其文件头页。
-
-## 5. LRU 与 FIFO
-
-启动参数：
-
-```bash
-observer -r lru
-observer -r fifo
-```
-
-默认策略为 LRU，名称不区分大小写；未知名称记录警告并回退到 LRU。
-
-内部缓存链表的新页面从头部插入，victim 从尾部选择，并跳过 pinned Frame：
-
-- LRU：缓存命中时把页面移动到头部，尾部是最近最少访问页面；
-- FIFO：缓存命中时不改变顺序，尾部是最早进入缓存的页面。
-
-确定性访问序列：
+`storage/buffer/replacement/replacement_policy.h/.cpp` 定义统一 `ReplacementPolicy`：
 
 ```text
-容量：3
-访问：1, 2, 3, 1, 4
-LRU victim：2
-FIFO victim：1
+BPFrameManager owns Frame cache
+  -> on_insert
+  -> on_access
+  -> on_pin / on_unpin
+  -> on_remove
+  -> choose_victim(is_replaceable)
+       -> LRUReplacementPolicy
+       -> FIFOReplacementPolicy
+       -> ClockReplacementPolicy
 ```
 
-## 6. 统计指标
+策略只保存淘汰元数据，不拥有或暴露 `Frame *`。`BPFrameManager` 提供 `is_replaceable` 判定，最终以实际 `pin_count == 0` 为准。`DiskBufferPool` 不包含按策略分支的 `if/else`。
 
-`BufferPoolStats` 提供以下累计指标：
+## 7. LRU
 
-| 指标 | 含义 |
-| --- | --- |
-| `requests` | `get_this_page` 请求数 |
-| `hits` | 在 Frame Cache 中找到页面 |
-| `misses` | 需要加载页面 |
-| `hit_rate` | `hits / requests` |
-| `disk_reads` | 从目标分页文件实际读取的页数 |
-| `disk_writes` | 向目标分页文件实际写入的页数 |
-| `evictions` | 被淘汰的 Frame 数 |
-| `dirty_evictions` | 淘汰前为 dirty 的 Frame 数 |
-| `flushes` | Page 进入刷新流程的次数 |
-| `allocations` | 页分配次数 |
-| `disposals` | 页释放次数 |
+新 Frame 位于新近端；缓存命中调用 `on_access`，更新新近性；从最久未访问且未 pin 的 Frame 开始选 victim。既有确定性语义保持：容量 3，访问 `1,2,3,1,4`，victim 为 2。
 
-`BufferPoolManager::stats()` 返回只读快照，`reset_stats()` 用于划分实验阶段。进程退出时日志中会产生：
+## 8. FIFO
+
+新 Frame 按首次进入顺序排队；命中不改变顺序；选择最早进入且未 pin 的 Frame。相同序列的 victim 为 1。
+
+## 9. CLOCK
+
+CLOCK 使用环形 FrameId 列表、clock hand 和 reference bit：插入或访问设为 1；扫描遇到已 pin Frame 直接跳过；遇到 reference=1 清零并给予 second chance；遇到 reference=0 选为 victim并推进 hand。空缓存、部分/全部 pinned、删除和重新插入均有明确处理。
+
+```bash
+./csudb --replacement clock
+```
+
+策略名称大小写不敏感。未知值记录 WARN 并回退 LRU。
+
+## 10. Page I/O Backend
+
+`storage/buffer/page_io_backend.h/.cpp` 是目标分页文件的 Page I/O 边界：
 
 ```text
-[BUFFER_POOL_STATS] policy=LRU,requests=...,hits=...,misses=...,hit_rate=...,...
+DiskBufferPool::load_page / write_page
+  -> PageIOBackend::read_page / write_page / sync
+       -> legacy
+       -> positional
 ```
 
-这些统计针对 Buffer Pool 的目标分页文件访问。Double Write Buffer 和 WAL 自身的额外文件 I/O 不混入 `disk_reads/disk_writes`。
+接口使用现有 `RC` 返回错误，日志包含 backend、operation、file、page、offset、errno。默认是 legacy，避免改变 Baseline 行为。
 
-## 7. Page Trace
+## 11. legacy：lseek + read/write
 
-Trace 使用现有日志系统，在 TRACE 级别输出，不改变 SQL 返回结果。稳定事件格式示例：
+legacy 先 `lseek` 到 `page_num * 8192`，再调用 `common::readn/writen` 完整传输一页。`DiskBufferPool::wr_lock_` 保留原有序列化边界。
+
+```bash
+./csudb --io-backend legacy
+```
+
+## 12. positional：pread/pwrite
+
+positional 调用新增的 `common::preadn/pwriten`。helper 循环处理短读写和 EINTR/EAGAIN；提前 EOF 返回读错误；零长度写入按 I/O 错误处理；每轮推进 buffer 和显式 offset，不依赖共享文件位置。
+
+```bash
+./csudb --io-backend positional
+```
+
+本阶段为兼容既有锁语义，positional 仍位于 `wr_lock_` 内；后续可在并发审计后缩小该锁，而无需改高层调用。
+
+## 13. BufferPoolStats
+
+全局统计由 `BPFrameManager` 持有；每个 `DiskBufferPool` 另有分页文件维度统计。新增指标：
+
+- `pin_requests`、`unpin_requests`、`no_buffer_failures`；
+- `current_pinned_frames`、`peak_pinned_frames`；
+- `dirty_pages_current`、`peak_dirty_pages`；
+- `bytes_read`、`bytes_written`；
+- 读、写、Flush 总延迟与读写最大延迟；
+- `eviction_flushes`、`explicit_flushes`、`shutdown_flushes`。
+
+所有累计计数使用 relaxed atomic；峰值使用 CAS 更新。`disk_reads/disk_writes` 只在 PageIOBackend 真正成功访问目标分页文件后增加，Buffer hit 不增加 `disk_reads`。
+
+进程关闭时的汇总示例：
 
 ```text
-[BUFFER_POOL_TRACE] event=HIT policy=LRU buffer_pool_id=1 page_num=2 pin_count=1
-[BUFFER_POOL_TRACE] event=MISS policy=LRU buffer_pool_id=1 page_num=3
-[BUFFER_POOL_TRACE] event=DISK_READ buffer_pool_id=1 page_num=3 bytes=8192
-[BUFFER_POOL_TRACE] event=EVICT policy=LRU buffer_pool_id=1 page_num=2 dirty=0
-[BUFFER_POOL_TRACE] event=FLUSH buffer_pool_id=1 page_num=3
-[BUFFER_POOL_TRACE] event=DISK_WRITE buffer_pool_id=1 page_num=3 bytes=8192
+[BUFFER_POOL_STATS] policy=CLOCK,io_backend=positional,requests=...,bytes_read=...,...
 ```
 
-还包括 `ALLOCATE` 和 `DISPOSE`。默认 `etc/observer.ini` 的文件日志级别为 TRACE，可在 observer 工作目录按日期生成的 `observer.log.<日期>` 中筛选：
+## 14. Frame Snapshot
+
+`buffer_pool_diagnostics.h` 定义稳定 DTO：
+
+- `FrameSnapshot`：frame_id、buffer_pool_id、page_num、pin_count、dirty、replaceable、last_access_ns、policy_metadata；
+- `BufferPoolSnapshot`：capacity、used/free/pinned/dirty frame 数、policy、I/O backend、文件信息、统计和 Frame 列表。
+
+快照复制值，不暴露 `Frame *`、`Page *`、mutex 或内部缓存容器。未来 CLI/GUI 应只消费该 DTO。
+
+## 15. Page Lifecycle Trace
+
+继续使用唯一的 `[BUFFER_POOL_TRACE]`，保持 TRACE 级别。事件包括：`HIT`、`MISS`、`DISK_READ`、`DISK_WRITE`、`EVICT`、`FLUSH`、`ALLOCATE`、`DISPOSE`、`PIN`、`UNPIN`、`NO_BUFFER`。
+
+每个事件带进程内单调 `event_seq`；能安全获得时还带 frame_id、duration_ns、flush_reason、policy 与 io_backend。默认 SQL 输出不受影响。筛选方式：
 
 ```bash
-rg 'BUFFER_POOL_(TRACE|STATS)' observer.log.*
+rg 'BUFFER_POOL_(TRACE|STATS)' csudb.log.*
 ```
 
-## 8. 构建与自动测试
+## 16. Dirty Page Flush
+
+`FlushReason` 包括 `EXPLICIT`、`EVICTION`、`SHUTDOWN`、`CHECKPOINT`、`OTHER`。仅真实路径使用对应原因：淘汰写回是 EVICTION，正常关闭 purge 是 SHUTDOWN，公开 Flush API 是 EXPLICIT；本阶段没有伪造 checkpoint。
+
+`flush_dirty_pages(max_pages, result, reason)`：
+
+- `max_pages == 0` 表示全部安全脏页；
+- 跳过业务仍 pin 的页；
+- 返回 flushed、skipped pinned、failed 数量；
+- 返回首个 I/O `RC`，同时继续释放诊断快照所加的临时 pin。
+
+本阶段不创建后台 cleaner thread。
+
+## 17. Pin / No Buffer Diagnostics
+
+分配失败且找不到 victim 时增加 `no_buffer_failures`，输出 `NO_BUFFER` Trace 和 WARN，包含 capacity、used、pinned、dirty。随后最多记录 8 个 pinned Frame 的 id、pool、page、pin count 和 dirty 状态，避免日志爆量。
+
+正常关闭时也做只读 pin leak 检查；只告警，不强制 unpin、不篡改 pin count、不偷偷释放页。
+
+## 18. Persistence
+
+实测命令：
 
 ```bash
-./build.sh debug --make -j4
-cd build_debug
-ctest --output-on-failure \
-  -R 'buffer_pool_os_test|bp_manager_test|disk_buffer_pool_test|record_manager_test|double_write_buffer_test'
+./build_debug/bin/csudbd --config etc/csudb.ini \
+  --data-dir /tmp/csudb-os-lab \
+  --replacement clock --io-backend positional
+
+# 另一个终端
+./build_debug/bin/csudb -u root -p
 ```
 
-`buffer_pool_os_test` 覆盖：
-
-- 同一访问序列下 LRU/FIFO victim 不同；
-- 策略名称解析；
-- hit/miss/disk read 统计；
-- dirty eviction 统计；
-- 全部 Frame pinned 时返回 `BUFFERPOOL_NOBUF`。
-
-原有测试继续覆盖页分配/释放、重启后 bitmap、Record Page 和 Double Write Buffer。
-
-## 9. CLI 实验步骤
-
-在独立目录启动，避免数据进入仓库：
-
-```bash
-mkdir -p /tmp/csudb-os-lru
-cd /tmp/csudb-os-lru
-/path/to/CSU-DBMS/csudb \
-  --buffer-size 262144 --replacement lru
-```
-
-执行：
+实测 SQL：
 
 ```sql
 CREATE TABLE student (id INT, name CHAR(20));
@@ -187,59 +221,33 @@ DELETE FROM student WHERE id = 1;
 SELECT * FROM student;
 ```
 
-退出后筛选日志，并在另一个空目录以 `-r fifo` 重复相同工作负载。报告至少比较：
+结果依次为两行、`Alice`、成功删除、仅 `2 | Bob`。退出后用 positional 重启，再以 LRU+legacy、FIFO+legacy 打开同一数据目录，均查询到 `2 | Bob`。
 
-| Policy | Frames | Requests | Hits | Misses | Hit Rate | Reads | Writes | Evictions |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| LRU | 32 |  |  |  |  |  |  |  |
-| FIFO | 32 |  |  |  |  |  |  |  |
+## 19. Current Limitations
 
-为了观察稳定差异，应构造超过缓存容量的多页数据，并重复访问部分热点页面。只有两行数据时主要用于正确性和持久化验证，不能有效评价替换算法。
+- 为保持并发语义，FrameManager 淘汰路径仍可能持有管理锁执行慢 I/O；这是已知的 Future Optimization。
+- positional 当前仍受每个 DiskBufferPool 的 `wr_lock_` 保护，尚未释放并发潜力。
+- Snapshot 是调用时刻的只读副本，不是跨多个后续操作的一致性事务视图。
+- Global Stats 是完整生命周期统计；Per DiskBufferPool Stats 重点保证请求、目标 I/O、淘汰与 Flush 维度，跨文件共享容量仍以 Global Snapshot 为准。
+- 没有后台 dirty cleaner、read-ahead、async writer、mmap 或 O_DIRECT。
+- `bplus_tree_log_test` 和 `mvcc_trx_log_test` 的 Baseline 上游问题不属于本阶段，本次未修改其实现或断言。
 
-## 10. 结果判定
+## 20. Future Extensions
 
-实验完成应满足：
+| 功能 | 扩展入口 |
+| --- | --- |
+| LRU-K / 2Q / ARC | 实现新的 `ReplacementPolicy`，接入 factory |
+| mmap | 实现新的 `PageIOBackend`，定义映射与 `msync` 生命周期 |
+| O_DIRECT | 实现新的 `PageIOBackend`，先解决 buffer/offset/filesystem alignment |
+| Background Cleaner | 调度现有 `flush_dirty_pages`，并先验证 WAL/double-write ordering |
+| Sequential Read-Ahead / Async Prefetch | 从 `load_page` miss 与 PageIOBackend 边界扩展 |
+| Async Page Writer | 从 FlushReason、批量 Flush 和 PageIOBackend 扩展 |
 
-- Debug Build 成功；
-- LRU/FIFO 确定性 victim 测试通过；
-- 缓存大小参数实际改变 Frame 数量；
-- hit/miss 与 I/O 统计符合访问过程；
-- pinned Frame 不被淘汰；
-- Trace 能定位 page、event 和 policy；
-- CREATE/INSERT/SELECT/WHERE/DELETE 正常；
-- observer 重启后数据仍存在。
+验证命令：
 
-## 11. 实际验证记录
-
-验证日期：2026-09-08。
-
-```text
-Debug Build: 成功
-OS/Buffer/Record 专项 CTest: 5/5 targets 通过
-全量 CTest: 45/47 targets 通过（96%）
-FIFO CLI SQL: 成功
-LRU CLI SQL: 成功
-FIFO 重启持久化: 成功，重启后仍返回 2 | Bob
+```bash
+./build.sh debug --make -j4
+./build_debug/unittest/buffer_pool_os_test
 ```
 
-32 Frame、两行数据的基础 SQL 工作负载实测：
-
-| Policy | Frames | Requests | Hits | Misses | Hit Rate | Reads | Writes | Evictions |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| LRU | 32 | 7 | 7 | 0 | 1.0 | 1 | 3 | 0 |
-| FIFO | 32 | 7 | 7 | 0 | 1.0 | 1 | 3 | 0 |
-
-两组结果相同是合理的：数据仅占一个 Record Page，工作集没有超过缓存容量。替换算法差异由自动化确定性序列验证：LRU 淘汰 Page 2，FIFO 淘汰 Page 1。
-
-全量测试的两个失败项与 Baseline 一致：`bplus_tree_log_test` 的并发 pin-count 断言，以及 `mvcc_trx_log_test` 的上游 ASAN use-after-free/事务断言。本次没有修改 B+Tree、MVCC 或 WAL 实现。
-
-## 12. 后续可选优化
-
-以下不属于本阶段硬性要求：
-
-- `lseek + read/write` 改为 `pread/pwrite`；
-- 持久化 free-page list 或多级 bitmap；
-- 缩小 `DiskBufferPool` 全局锁粒度；
-- 淘汰时避免在 Frame Manager 锁内执行磁盘 I/O；
-- CLOCK/2Q 等替换策略；
-- 崩溃注入和性能基准。
+本阶段 `buffer_pool_os_test` 6/6 通过，覆盖 LRU/FIFO/CLOCK、策略/后端解析、dirty eviction、统计和全 pinned 的 `BUFFERPOOL_NOBUF`。

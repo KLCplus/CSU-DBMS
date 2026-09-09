@@ -39,10 +39,12 @@ public:
    * @param trx_kit_name 使用哪种类型的事务模型
    * @param log_handler_name 使用哪种类型的日志处理器
    * @param buffer_pool_memory_size Buffer Pool 可使用的页面内存字节数，小于等于0时使用默认值
-   * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo
+   * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo/clock
+   * @param page_io_backend 页文件 I/O 后端，支持 legacy/positional
    */
   RC init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name, const char *storage_engine,
-      int buffer_pool_memory_size = 0, const char *buffer_pool_replacement_policy = "lru");
+      int buffer_pool_memory_size = 0, const char *buffer_pool_replacement_policy = "lru",
+      const char *page_io_backend = "legacy");
   void destroy();
 
   /**
@@ -93,6 +95,9 @@ public:
 
   RC sync();
 
+  vector<string> opened_databases() const;
+  const filesystem::path &base_dir() const { return base_dir_; }
+
 private:
   filesystem::path  base_dir_;          ///< 存储引擎的根目录
   filesystem::path  db_dir_;            ///< 数据库文件的根目录
@@ -102,4 +107,5 @@ private:
   string            storage_engine_;    ///< 存储引擎的名称
   int               buffer_pool_memory_size_ = 0;
   string            buffer_pool_replacement_policy_ = "lru";
+  string            page_io_backend_ = "legacy";
 };

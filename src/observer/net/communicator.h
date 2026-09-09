@@ -22,6 +22,7 @@ struct ConnectionContext;
 class SessionEvent;
 class Session;
 class BufferedWriter;
+class QueryResult;
 
 /**
  * @defgroup Communicator
@@ -63,6 +64,9 @@ public:
    */
   virtual RC write_result(SessionEvent *event, bool &need_disconnect) = 0;
 
+  virtual bool structured_protocol() const { return false; }
+  virtual RC write_query_result(const QueryResult &, bool &need_disconnect);
+
   /**
    * @brief 关联的会话信息
    */
@@ -92,6 +96,7 @@ protected:
  */
 enum class CommunicateProtocol
 {
+  NATIVE, ///< CSUDB JSON DTO protocol, NUL framed
   PLAIN,  ///< 以'\0'结尾的协议
   CLI,    ///< 与客户端进行交互的协议。CLI 不应该是一种协议，只是一种通讯的方式而已
   MYSQL,  ///< mysql通讯协议。具体实现参考 MysqlCommunicator

@@ -1,12 +1,3 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
 
 #pragma once
 
@@ -15,14 +6,16 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/lang/string.h"
 
-enum class BufferPoolReplacementPolicy
+enum class FlushReason
 {
-  LRU,
-  FIFO,
+  EXPLICIT,
+  EVICTION,
+  SHUTDOWN,
+  CHECKPOINT,
+  OTHER,
 };
 
-const char *buffer_pool_replacement_policy_name(BufferPoolReplacementPolicy policy);
-bool parse_buffer_pool_replacement_policy(const string &name, BufferPoolReplacementPolicy &policy);
+const char *flush_reason_name(FlushReason reason);
 
 struct BufferPoolStatsSnapshot
 {
@@ -36,6 +29,23 @@ struct BufferPoolStatsSnapshot
   uint64_t flushes          = 0;
   uint64_t page_allocations = 0;
   uint64_t page_disposals   = 0;
+  uint64_t pin_requests             = 0;
+  uint64_t unpin_requests           = 0;
+  uint64_t no_buffer_failures       = 0;
+  uint64_t current_pinned_frames    = 0;
+  uint64_t peak_pinned_frames       = 0;
+  uint64_t dirty_pages_current      = 0;
+  uint64_t peak_dirty_pages         = 0;
+  uint64_t bytes_read               = 0;
+  uint64_t bytes_written            = 0;
+  uint64_t read_latency_ns_total    = 0;
+  uint64_t write_latency_ns_total   = 0;
+  uint64_t flush_latency_ns_total   = 0;
+  uint64_t read_latency_max_ns      = 0;
+  uint64_t write_latency_max_ns     = 0;
+  uint64_t eviction_flushes         = 0;
+  uint64_t explicit_flushes         = 0;
+  uint64_t shutdown_flushes         = 0;
 
   double hit_rate() const;
   string to_string() const;
@@ -50,12 +60,17 @@ class BufferPoolStats
 {
 public:
   void record_page_request(bool hit);
-  void record_disk_read();
-  void record_disk_write();
+  void record_disk_read(uint64_t bytes = 0, uint64_t latency_ns = 0);
+  void record_disk_write(uint64_t bytes = 0, uint64_t latency_ns = 0);
   void record_eviction(bool dirty);
-  void record_flush();
+  void record_flush(FlushReason reason = FlushReason::OTHER, uint64_t latency_ns = 0);
   void record_page_allocation();
   void record_page_disposal();
+  void record_pin(bool first_pin);
+  void record_unpin(bool last_unpin);
+  void record_no_buffer_failure();
+  void record_dirty();
+  void record_clean();
 
   BufferPoolStatsSnapshot snapshot() const;
   void reset();
@@ -71,4 +86,21 @@ private:
   std::atomic<uint64_t> flushes_{0};
   std::atomic<uint64_t> page_allocations_{0};
   std::atomic<uint64_t> page_disposals_{0};
+  std::atomic<uint64_t> pin_requests_{0};
+  std::atomic<uint64_t> unpin_requests_{0};
+  std::atomic<uint64_t> no_buffer_failures_{0};
+  std::atomic<uint64_t> current_pinned_frames_{0};
+  std::atomic<uint64_t> peak_pinned_frames_{0};
+  std::atomic<uint64_t> dirty_pages_current_{0};
+  std::atomic<uint64_t> peak_dirty_pages_{0};
+  std::atomic<uint64_t> bytes_read_{0};
+  std::atomic<uint64_t> bytes_written_{0};
+  std::atomic<uint64_t> read_latency_ns_total_{0};
+  std::atomic<uint64_t> write_latency_ns_total_{0};
+  std::atomic<uint64_t> flush_latency_ns_total_{0};
+  std::atomic<uint64_t> read_latency_max_ns_{0};
+  std::atomic<uint64_t> write_latency_max_ns_{0};
+  std::atomic<uint64_t> eviction_flushes_{0};
+  std::atomic<uint64_t> explicit_flushes_{0};
+  std::atomic<uint64_t> shutdown_flushes_{0};
 };

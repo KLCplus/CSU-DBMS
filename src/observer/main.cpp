@@ -1,23 +1,8 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
-
-// __CR__
-
-/*
- *  Created on: Mar 11, 2012
- *      Author: Longda Feng
- */
 
 #include <netinet/in.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <arpa/inet.h>
 
 #include "common/ini_setting.h"
 #include "common/init.h"
@@ -27,8 +12,10 @@ See the Mulan PSL v2 for more details. */
 #include "common/os/process.h"
 #include "common/os/signal.h"
 #include "common/log/log.h"
+#include "common/version.h"
 #include "net/server.h"
 #include "net/server_param.h"
+#include "service/database_service.h"
 
 using namespace common;
 
@@ -36,35 +23,26 @@ using namespace common;
 
 static Server *g_server = nullptr;
 
-namespace {
-
-constexpr const char *CSUDB_VERSION = "0.1.0";
-
-bool is_csudb_cli_frontend()
-{
-#ifdef CSUDB_CLI_FRONTEND
-  return true;
-#else
-  return false;
-#endif
-}
-
-}  // namespace
-
 void usage(const char *program)
 {
-  cout << "CSU-DBMS " << CSUDB_VERSION << endl;
+  cout << CSUDB_PRODUCT_NAME << " " << CSUDB_VERSION_STRING << endl;
   cout << "Usage: " << program << " [options]" << endl << endl;
   cout << "  -h, --help                 Show this help" << endl;
   cout << "  -v, --version              Show version" << endl;
-  cout << "  -f, --config PATH          Configuration file" << endl;
-  cout << "  -P, --protocol MODE        cli, plain, or mysql" << endl;
-  cout << "  -p, --port PORT            Server port" << endl;
+  cout << "  -f, --config FILE          Configuration file" << endl;
+  cout << "      --initialize           Initialize a new data directory and exit" << endl;
+  cout << "      --host HOST            Bind address (default 127.0.0.1)" << endl;
+  cout << "  -p, --port PORT            Listen port (default 6789)" << endl;
+  cout << "      --data-dir DIR         Database data directory" << endl;
+  cout << "      --log-dir DIR          Log directory" << endl;
+  cout << "      --foreground           Run in foreground (default)" << endl;
+  cout << "  -P, --protocol MODE        native, plain, cli, or mysql" << endl;
   cout << "  -s, --socket PATH          Unix socket path" << endl;
   cout << "  -t, --transaction MODEL    vacuous or mvcc" << endl;
   cout << "  -T, --threads MODEL        one-thread-per-connection or java-thread-pool" << endl;
   cout << "  -n, --buffer-size BYTES    Buffer pool capacity" << endl;
-  cout << "  -r, --replacement POLICY   lru or fifo" << endl;
+  cout << "  -r, --replacement POLICY   lru, fifo, or clock" << endl;
+  cout << "      --io-backend BACKEND   legacy or positional" << endl;
   cout << "  -d, --durable              Enable disk durability" << endl;
   cout << "  -E, --engine ENGINE        heap or lsm" << endl;
 }
@@ -76,15 +54,18 @@ void parse_parameter(int argc, char **argv)
   ProcessParam *process_param = the_process_param();
 
   process_param->init_default(process_name);
-
-  if (is_csudb_cli_frontend()) {
-    process_param->set_protocol("cli");
+  process_param->set_protocol("native");
 #ifdef CSUDB_DEFAULT_CONFIG
-    process_param->set_conf(CSUDB_DEFAULT_CONFIG);
+  process_param->set_conf(CSUDB_DEFAULT_CONFIG);
 #endif
-  }
 
   // Process args
+  constexpr int OPT_IO_BACKEND = 1000;
+  constexpr int OPT_HOST = 1001;
+  constexpr int OPT_DATA_DIR = 1002;
+  constexpr int OPT_LOG_DIR = 1003;
+  constexpr int OPT_INITIALIZE = 1004;
+  constexpr int OPT_FOREGROUND = 1005;
   static option long_options[] = {{"help", no_argument, nullptr, 'h'},
       {"version", no_argument, nullptr, 'v'},
       {"config", required_argument, nullptr, 'f'},
@@ -95,6 +76,12 @@ void parse_parameter(int argc, char **argv)
       {"threads", required_argument, nullptr, 'T'},
       {"buffer-size", required_argument, nullptr, 'n'},
       {"replacement", required_argument, nullptr, 'r'},
+      {"io-backend", required_argument, nullptr, OPT_IO_BACKEND},
+      {"host", required_argument, nullptr, OPT_HOST},
+      {"data-dir", required_argument, nullptr, OPT_DATA_DIR},
+      {"log-dir", required_argument, nullptr, OPT_LOG_DIR},
+      {"initialize", no_argument, nullptr, OPT_INITIALIZE},
+      {"foreground", no_argument, nullptr, OPT_FOREGROUND},
       {"durable", no_argument, nullptr, 'd'},
       {"engine", required_argument, nullptr, 'E'},
       {nullptr, 0, nullptr, 0}};
@@ -105,7 +92,7 @@ void parse_parameter(int argc, char **argv)
       case 's': process_param->set_unix_socket_path(optarg); break;
       case 'p': process_param->set_server_port(atoi(optarg)); break;
       case 'P': process_param->set_protocol(optarg); break;
-      case 'f': process_param->set_conf(optarg); break;
+      case 'f': process_param->set_conf_explicit(optarg); break;
       case 'o': process_param->set_std_out(optarg); break;
       case 'e': process_param->set_std_err(optarg); break;
       case 't': process_param->set_trx_kit_name(optarg); break;
@@ -113,13 +100,19 @@ void parse_parameter(int argc, char **argv)
       case 'T': process_param->set_thread_handling_name(optarg); break;
       case 'n': process_param->set_buffer_pool_memory_size(atoi(optarg)); break;
       case 'r': process_param->set_buffer_pool_replacement_policy(optarg); break;
+      case OPT_IO_BACKEND: process_param->set_page_io_backend(optarg); break;
+      case OPT_HOST: process_param->set_listen_host(optarg); break;
+      case OPT_DATA_DIR: process_param->set_data_dir(optarg); break;
+      case OPT_LOG_DIR: process_param->set_log_dir(optarg); break;
+      case OPT_INITIALIZE: process_param->set_initialize(true); break;
+      case OPT_FOREGROUND: process_param->set_demon(false); break;
       case 'd': process_param->set_durability_mode("disk"); break;
       case 'h':
         usage(argv[0]);
         exit(0);
         return;
       case 'v':
-        cout << "CSU-DBMS " << CSUDB_VERSION << endl;
+        cout << CSUDB_PRODUCT_NAME << " " << CSUDB_VERSION_STRING << endl;
         exit(0);
         return;
       default: cout << "Unknown option: " << static_cast<char>(opt) << ", ignored" << endl; break;
@@ -133,7 +126,7 @@ Server *init_server()
 
   ProcessParam *process_param = the_process_param();
 
-  long listen_addr        = INADDR_ANY;
+  long listen_addr        = ntohl(inet_addr("127.0.0.1"));
   long max_connection_num = MAX_CONNECTION_NUM_DEFAULT;
   int  port               = PORT_DEFAULT;
 
@@ -141,6 +134,15 @@ Server *init_server()
   if (it != net_section.end()) {
     string str = it->second;
     str_to_val(str, listen_addr);
+  }
+
+  if (!process_param->listen_host().empty()) {
+    in_addr parsed{};
+    if (inet_pton(AF_INET, process_param->listen_host().c_str(), &parsed) != 1) {
+      cerr << "Invalid IPv4 bind address: " << process_param->listen_host() << endl;
+      return nullptr;
+    }
+    listen_addr = ntohl(parsed.s_addr);
   }
 
   it = net_section.find(MAX_CONNECTION_NUM);
@@ -169,8 +171,10 @@ Server *init_server()
   } else if (0 == strcasecmp(process_param->get_protocol().c_str(), "cli")) {
     server_param.use_std_io = true;
     server_param.protocol   = CommunicateProtocol::CLI;
-  } else {
+  } else if (0 == strcasecmp(process_param->get_protocol().c_str(), "plain")) {
     server_param.protocol = CommunicateProtocol::PLAIN;
+  } else {
+    server_param.protocol = CommunicateProtocol::NATIVE;
   }
 
   if (process_param->get_unix_socket_path().size() > 0 && !server_param.use_std_io) {
@@ -218,7 +222,7 @@ void print_startup_screen()
 {
   cout << R"(
 ╭──────────────────────────────────────────────────────────╮
-│                      CSU-DBMS                            │
+│                       CSUDB 2026                         │
 │       Compiler × Database × Operating Systems            │
 ╰──────────────────────────────────────────────────────────╯
 )";
@@ -228,7 +232,7 @@ void print_startup_screen()
     cout << "Type 'help;' for SQL examples; type 'exit' or '\\q' to leave." << endl;
     cout << "Data directory: ./csudb_data/db/sys" << endl << endl;
   } else {
-    cout << "CSU-DBMS server is starting. Press Ctrl+C to stop." << endl << endl;
+    cout << "CSUDB server is starting. Press Ctrl+C to stop." << endl << endl;
   }
 }
 
@@ -249,7 +253,49 @@ int main(int argc, char **argv)
     return rc;
   }
 
+  string temporary_root_password;
+  bool catalog_created = false;
+  if (the_process_param()->initialize()) {
+    const char *password_env = getenv("CSUDB_INITIAL_ROOT_PASSWORD");
+    string effective_password;
+    RC init_rc = DatabaseService::initialize_new(the_process_param()->data_dir(), password_env == nullptr ? "" : password_env, effective_password);
+    if (init_rc == RC::FILE_EXIST) {
+      cerr << "ERROR: CSUDB data directory is already initialized." << endl;
+      cleanup();
+      return 1;
+    }
+    if (OB_FAIL(init_rc)) {
+      cerr << "ERROR: failed to initialize system catalog: " << strrc(init_rc) << endl;
+      cleanup();
+      return 1;
+    }
+    cout << "Initializing CSUDB data directory..." << endl
+         << "Data directory : " << the_process_param()->data_dir() << endl
+         << "System catalog : created" << endl
+         << "Root user      : created" << endl
+         << "Temporary root password:" << endl << effective_password << endl
+         << "Initialization complete." << endl;
+    cleanup();
+    return 0;
+  }
+
+  RC service_rc = DatabaseService::initialize(the_process_param()->data_dir(), temporary_root_password, catalog_created);
+  if (OB_FAIL(service_rc)) {
+    cerr << "ERROR: failed to initialize DatabaseService: " << strrc(service_rc) << endl;
+    cleanup();
+    return 1;
+  }
+  if (catalog_created) {
+    cout << "CSUDB system catalog was initialized." << endl
+         << "Temporary root password: " << temporary_root_password << endl
+         << "Change it after the first login." << endl;
+  }
+
   g_server = init_server();
+  if (g_server == nullptr) {
+    cleanup();
+    return 1;
+  }
   g_server->serve();
 
   LOG_INFO("Server stopped");

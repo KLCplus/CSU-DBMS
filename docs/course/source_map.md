@@ -82,13 +82,16 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | `src/observer/storage/buffer/page.h` | 固定 8 KiB Page 布局 | Frame/DiskBufferPool | LSN/checksum/data | OS/DB | P0 | 可视化可读；不可随意改格式 |
 | `src/observer/storage/buffer/frame.h/.cpp` | 内存 Page、dirty、pin、latch、访问时间 | BPFrameManager/Record/B+Tree | Page, mutex/session debug id | OS/DB | P0 | Frame/Pin Trace |
-| `src/observer/storage/buffer/disk_buffer_pool.h/.cpp` | Frame manager、文件页管理、LRU/FIFO、加载/刷新 | Record/B+Tree/Db | lseek/read/write, DoubleWrite, Log | OS/DB | P0 | Buffer Trace、替换策略、I/O Trace |
-| `src/observer/storage/buffer/buffer_pool_stats.h/.cpp` | 缓存命中、I/O、淘汰与刷新统计 | DiskBufferPool/BPFrameManager | atomic counters | OS | P0 | 实验统计输出 |
+| `src/observer/storage/buffer/disk_buffer_pool.h/.cpp` | Frame manager、文件页管理、策略/I/O 委托、加载/分类刷新 | Record/B+Tree/Db | ReplacementPolicy, PageIOBackend, DoubleWrite, Log | OS/DB | P0 | 生命周期 Trace、批量 Flush；慎改锁边界 |
+| `src/observer/storage/buffer/replacement/replacement_policy.h/.cpp` | LRU/FIFO/CLOCK 淘汰元数据与 victim 选择 | BPFrameManager | FrameId, replaceable predicate | OS | P0 | LRU-K/2Q/ARC 接口 |
+| `src/observer/storage/buffer/page_io_backend.h/.cpp` | legacy/positional 目标分页文件读写边界 | DiskBufferPool/BufferPoolManager | readn/writen/preadn/pwriten | OS | P0 | mmap/O_DIRECT 接口 |
+| `src/observer/storage/buffer/buffer_pool_stats.h/.cpp` | 命中、I/O、pin、脏页、延迟、淘汰与分类 Flush 统计 | DiskBufferPool/BPFrameManager/Frame | atomic counters | OS | P0 | 实验统计输出 |
+| `src/observer/storage/buffer/buffer_pool_diagnostics.h/.cpp` | Frame/Buffer Snapshot DTO、Dirty Flush 结果、Trace sequence | BufferPoolManager/DiskBufferPool | copied values, atomic sequence | OS | P0 | CLI/GUI 只读诊断 API |
 | `src/observer/storage/buffer/double_write_buffer.cpp` | 先写 double-write 文件再落目标页 | DiskBufferPool/Db | file I/O | OS/DB | P2 | 崩溃恢复实验 |
-| `src/common/lang/lru_cache.h` | 通用有序缓存，支持触碰/不触碰顺序查询 | BPFrameManager/common/oblsm users | containers | OS | P1 | LRU/FIFO 顺序基础 |
+| `src/common/io/io.h/.cpp` | 可靠的 readn/writen 与 positional preadn/pwriten | PageIOBackend/common users | POSIX I/O | OS | P0 | 系统调用实验边界 |
 | `src/observer/storage/persist/persist.cpp` | 通用文件持久化辅助 | tests/consumers | open/read/write | OS | P2 | I/O 实验 |
 
-关键路径：`RecordPageHandler` pin Page → `DiskBufferPool::get_this_page` → `BPFrameManager::get/alloc` → miss 时 `load_page`/`lseek + read`；更新后 `Frame::mark_dirty`，最终 `flush_page`/`write_page`/`lseek + write`。
+关键路径：`RecordPageHandler` pin Page → `DiskBufferPool::get_this_page` → `BPFrameManager::get/alloc` → `ReplacementPolicy` 维护访问/淘汰元数据 → miss 时 `load_page` → `PageIOBackend::read_page`；更新后 `Frame::mark_dirty`，最终分类 `flush_page` → `write_page` → `PageIOBackend::write_page`。
 
 ## 7. Index、Transaction 与 Log（Advanced / Reserved）
 
