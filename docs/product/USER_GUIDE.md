@@ -14,8 +14,7 @@ cd /home/konglingchen/code/DBMS/miniob
 
 ```bash
 ./build_debug/bin/csudbd \
-  --config ./etc/csudb.ini \
-  --data-dir ./csudb_data
+  --config ./etc/csudb.ini
 ```
 
 终端二进入数据库：
@@ -53,8 +52,7 @@ build_debug/bin/csudbd
 env CSUDB_INITIAL_ROOT_PASSWORD='MyRootPass2026!' \
   ./build_debug/bin/csudbd \
   --initialize \
-  --config ./etc/csudb.ini \
-  --data-dir ./csudb_data
+  --config ./etc/csudb.ini
 ```
 
 看到以下内容表示成功：
@@ -67,6 +65,8 @@ Initialization complete.
 
 初始化以后不要再次运行 `--initialize`。Root 密码会持久化，重启不会失效。
 
+普通 `csudbd` 启动不会隐式创建新系统目录。如果尚未完成初始化，服务端会退出并提示执行一次 `csudbd --initialize`，因此不会再因启动目录不同而悄悄生成另一套 Root 密码。
+
 ## 3. 日常启动与登录
 
 ### 3.1 启动服务端
@@ -77,8 +77,7 @@ Initialization complete.
 cd /home/konglingchen/code/DBMS/miniob
 
 ./build_debug/bin/csudbd \
-  --config ./etc/csudb.ini \
-  --data-dir ./csudb_data
+  --config ./etc/csudb.ini
 ```
 
 默认监听：
@@ -290,22 +289,24 @@ Ctrl+C
 
 ## 9. 数据保存在哪里
 
-本文命令统一使用：
+默认数据目录是稳定的用户级全局目录：
 
 ```text
-/home/konglingchen/code/DBMS/miniob/csudb_data
+$XDG_STATE_HOME/csudb
 ```
 
-相对仓库根目录就是：
+未设置 `XDG_STATE_HOME` 时，实际默认是：
 
 ```text
-./csudb_data
+~/.local/state/csudb
 ```
+
+它与当前工作目录无关。第一次执行 `csudbd --initialize` 和以后从任意目录执行 `csudbd`，都会使用同一个目录。
 
 主要内容：
 
 ```text
-csudb_data/
+~/.local/state/csudb/
 ├── system/catalog.json       用户、数据库和权限目录
 └── db/
     ├── sys/                  系统默认数据库
@@ -314,11 +315,28 @@ csudb_data/
         └── student.data      表记录页
 ```
 
-初始化与以后启动必须使用同一个 `--data-dir`。在其他目录启动时，建议使用绝对路径：
+路径选择优先级为：
+
+```text
+--data-dir
+> CSUDB_DATA_DIR
+> XDG_STATE_HOME/csudb
+> ~/.local/state/csudb
+```
+
+正常使用不要传 `--data-dir`。该参数只用于创建完全隔离的实验数据库。
+
+### 从旧项目目录迁移一次
+
+如果数据原来保存在项目中的 `csudb_data`，先正常停止服务端，然后复制完整目录：
 
 ```bash
---data-dir /home/konglingchen/code/DBMS/miniob/csudb_data
+mkdir -p "$HOME/.local/state"
+cp -a /home/konglingchen/code/DBMS/miniob/csudb_data \
+  "$HOME/.local/state/csudb"
 ```
+
+目标 `~/.local/state/csudb` 必须事先不存在。若已经存在，不要合并两套目录；先决定保留哪一套并分别备份。迁移验证成功前不要删除旧目录。
 
 ## 10. 备份与恢复
 
@@ -327,12 +345,12 @@ csudb_data/
 1. 在客户端输入 `\q`。
 2. 在服务端终端按 `Ctrl+C`。
 3. 确认 `csudbd` 已停止。
-4. 复制整个 `csudb_data` 目录。
+4. 复制整个 `~/.local/state/csudb` 目录。
 
 示例：
 
 ```bash
-cp -a ./csudb_data ./csudb_data.backup
+cp -a "$HOME/.local/state/csudb" "$HOME/.local/state/csudb.backup"
 ```
 
 恢复时同样先停止服务，然后将完整备份目录作为新的 `--data-dir`：
@@ -340,7 +358,7 @@ cp -a ./csudb_data ./csudb_data.backup
 ```bash
 ./build_debug/bin/csudbd \
   --config ./etc/csudb.ini \
-  --data-dir ./csudb_data.backup
+  --data-dir "$HOME/.local/state/csudb.backup"
 ```
 
 不要只复制某一个 `.data` 文件；Catalog、表元数据、索引和日志需要保持为同一份一致快照。
@@ -411,13 +429,13 @@ csudb --help
 csudb --ping
 ```
 
-启动服务端时仍建议明确指定数据目录：
+安装后第一次初始化：
 
 ```bash
-csudbd \
-  --config /home/konglingchen/code/DBMS/miniob/etc/csudb.ini \
-  --data-dir /home/konglingchen/code/DBMS/miniob/csudb_data
+env CSUDB_INITIAL_ROOT_PASSWORD='MyRootPass2026!' csudbd --initialize
 ```
+
+以后无论当前在哪个目录，都只需执行 `csudbd`。
 
 卸载程序：
 
@@ -426,7 +444,7 @@ cd /home/konglingchen/code/DBMS/miniob
 ./scripts/uninstall.sh --user
 ```
 
-卸载脚本不会删除 `csudb_data`。
+卸载脚本不会删除 `~/.local/state/csudb`。`~/.local/share/csudb` 是已安装的文档与示例，不是数据库运行数据。
 
 ## 13. 常见问题
 
@@ -450,11 +468,13 @@ ERROR: cannot connect to CSUDB server at 127.0.0.1:6789
 
 ### 重启后找不到用户或数据库
 
-通常是启动时换了 `--data-dir`。确保初始化和每次启动都使用：
+正常的无参数 `csudbd` 会固定使用：
 
 ```text
-/home/konglingchen/code/DBMS/miniob/csudb_data
+~/.local/state/csudb
 ```
+
+只有显式设置 `--data-dir`、`CSUDB_DATA_DIR` 或 `XDG_STATE_HOME` 才会切换数据目录。执行 `csudbd --help` 或观察启动页可以确认实际路径。
 
 ### 提示认证失败
 
