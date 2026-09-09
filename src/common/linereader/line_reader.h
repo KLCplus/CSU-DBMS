@@ -50,6 +50,8 @@ public:
    */
   std::string my_readline(const std::string &prompt, bool add_history = true);
   void add_history(const std::string &line);
+  void set_completion_callback(const replxx::Replxx::completion_callback_t &callback);
+  void set_hint_callback(const replxx::Replxx::hint_callback_t &callback);
   bool eof() const { return eof_; }
 
   /**

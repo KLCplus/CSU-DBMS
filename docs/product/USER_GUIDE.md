@@ -23,7 +23,7 @@ cd /home/konglingchen/code/DBMS/miniob
 ./build_debug/bin/csudb -u root -p
 ```
 
-停止：客户端输入 `\q`，然后在服务端终端按 `Ctrl+C`。
+停止：客户端输入 `/quit`，然后在服务端终端按 `Ctrl+C`。
 
 > `Enter password:` 后输入密码时屏幕不会显示字符或星号。正常输入完密码后按 Enter 即可。
 
@@ -46,11 +46,10 @@ build_debug/bin/csudbd
 
 ### 2.2 初始化
 
-初始化只执行一次。把下面的 `MyRootPass2026!` 换成自己的密码，至少 8 个字符：
+初始化只执行一次。命令会让你输入两次自己的 Root 密码，至少 8 个字符：
 
 ```bash
-env CSUDB_INITIAL_ROOT_PASSWORD='MyRootPass2026!' \
-  ./build_debug/bin/csudbd \
+./build_debug/bin/csudbd \
   --initialize \
   --config ./etc/csudb.ini
 ```
@@ -60,10 +59,11 @@ env CSUDB_INITIAL_ROOT_PASSWORD='MyRootPass2026!' \
 ```text
 System catalog : created
 Root user      : created
+Root password  : configured by user
 Initialization complete.
 ```
 
-初始化以后不要再次运行 `--initialize`。Root 密码会持久化，重启不会失效。
+密码输入时终端不会显示字符，这是正常的安全行为。两次密码必须一致。初始化以后不要再次运行 `--initialize`。Root 密码会持久化，重启不会失效。
 
 普通 `csudbd` 启动不会隐式创建新系统目录。如果尚未完成初始化，服务端会退出并提示执行一次 `csudbd --initialize`，因此不会再因启动目录不同而悄悄生成另一套 Root 密码。
 
@@ -150,23 +150,25 @@ DESC student;
 
 ## 5. 客户端常用命令
 
-反斜杠开头的是客户端命令，不是 SQL：
+斜杠开头的是客户端命令，不是 SQL。输入 `/` 后按 Tab 可查看或补全候选：
 
 | 命令 | 用途 |
 | --- | --- |
-| `\help` | 查看 Shell 帮助 |
-| `\q` | 退出客户端 |
-| `\status` | 查看连接、Session、Page Size 和 Buffer Pool 状态 |
-| `\database` | 查看当前数据库 |
-| `\use school` | 切换到 school |
-| `\timing on` | 显示 SQL 执行时间 |
-| `\history` | 查看本次会话历史 |
-| `\source demo.sql` | 执行 SQL 文件 |
-| `\output result.txt` | 将结果输出到文件 |
-| `\output` | 恢复输出到屏幕 |
-| `\buffer` | 查看 Buffer Pool 摘要 |
-| `\pages 20` | 查看前 20 个 Frame/Page 快照 |
-| `\server` | 查看服务端状态 |
+| `/help` | 查看 Shell 帮助 |
+| `/quit` | 退出客户端 |
+| `/status` | 查看连接、Session、Page Size 和 Buffer Pool 状态 |
+| `/database` | 查看当前数据库 |
+| `/use school` | 切换到 school |
+| `/timing on` | 显示 SQL 执行时间 |
+| `/history` | 查看本次会话历史 |
+| `/source demo.sql` | 执行 SQL 文件 |
+| `/output result.txt` | 将结果输出到文件 |
+| `/output` | 恢复输出到屏幕 |
+| `/buffer` | 查看 Buffer Pool 摘要 |
+| `/pages 20` | 查看前 20 个 Frame/Page 快照 |
+| `/server` | 查看服务端状态 |
+
+命令支持大小写无关的前缀补全和近似候选。例如 `/sta` 可补全 `/status`，输错 `/statsu` 会提示相近命令。旧的反斜杠命令仍作为兼容别名保留。
 
 SQL 可以分多行输入，遇到字符串外的 `;` 或 `\g` 才执行：
 
@@ -203,7 +205,7 @@ SHOW GRANTS FOR 'alice';
 退出 Root：
 
 ```text
-\q
+/quit
 ```
 
 使用 Alice 登录：
@@ -276,7 +278,7 @@ SQL 失败时客户端返回非零退出码，可用于脚本或 CI。
 客户端退出：
 
 ```text
-\q
+/quit
 ```
 
 回到服务端终端，按：
@@ -342,7 +344,7 @@ cp -a /home/konglingchen/code/DBMS/miniob/csudb_data \
 
 当前版本没有在线热备份工具。课程和开发环境推荐冷备份：
 
-1. 在客户端输入 `\q`。
+1. 在客户端输入 `/quit`。
 2. 在服务端终端按 `Ctrl+C`。
 3. 确认 `csudbd` 已停止。
 4. 复制整个 `~/.local/state/csudb` 目录。
@@ -401,9 +403,9 @@ CLOCK + positional，并设置 32 个 8 KiB Frame：
 进入客户端后查看：
 
 ```text
-\status
-\buffer
-\pages 20
+/status
+/buffer
+/pages 20
 ```
 
 ## 12. 安装成全局命令
@@ -432,7 +434,7 @@ csudb --ping
 安装后第一次初始化：
 
 ```bash
-env CSUDB_INITIAL_ROOT_PASSWORD='MyRootPass2026!' csudbd --initialize
+csudbd --initialize
 ```
 
 以后无论当前在哪个目录，都只需执行 `csudbd`。

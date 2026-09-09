@@ -1,8 +1,11 @@
 
 #include <netinet/in.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <unistd.h>
 #include <getopt.h>
 #include <arpa/inet.h>
+#include <termios.h>
 #include <filesystem>
 
 #include "common/ini_setting.h"
@@ -23,6 +26,84 @@ using namespace common;
 #define NET "NET"
 
 static Server *g_server = nullptr;
+
+bool read_secret(const char *prompt, string &secret)
+{
+  cerr << prompt << std::flush;
+  int input_fd = STDIN_FILENO;
+  bool close_input = false;
+  if (!isatty(input_fd)) {
+    input_fd = open("/dev/tty", O_RDONLY);
+    close_input = input_fd >= 0;
+  }
+  if (input_fd < 0) {
+    cerr << endl << "ERROR: no controlling terminal is available for secure password input." << endl;
+    return false;
+  }
+
+  termios original{};
+  bool echo_disabled = isatty(input_fd) && tcgetattr(input_fd, &original) == 0;
+  if (echo_disabled) {
+    termios protected_input = original;
+    protected_input.c_lflag &= ~ECHO;
+    if (tcsetattr(input_fd, TCSAFLUSH, &protected_input) != 0) echo_disabled = false;
+  }
+
+  secret.clear();
+  bool completed = false;
+  char character = '\0';
+  while (true) {
+    ssize_t count = ::read(input_fd, &character, 1);
+    if (count < 0 && errno == EINTR) continue;
+    if (count <= 0) break;
+    if (character == '\n' || character == '\r') {
+      completed = true;
+      break;
+    }
+    secret.push_back(character);
+  }
+
+  if (echo_disabled) tcsetattr(input_fd, TCSAFLUSH, &original);
+  if (close_input) ::close(input_fd);
+  cerr << endl;
+  return completed;
+}
+
+bool choose_initial_root_password(string &password)
+{
+  const char *password_env = getenv("CSUDB_INITIAL_ROOT_PASSWORD");
+  if (password_env != nullptr && password_env[0] != '\0') {
+    password = password_env;
+    if (password.size() < 8) {
+      cerr << "ERROR: CSUDB_INITIAL_ROOT_PASSWORD must contain at least 8 characters." << endl;
+      return false;
+    }
+    return true;
+  }
+
+  cout << "Choose the password for the initial root account." << endl;
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    string confirmation;
+    if (!read_secret("Enter root password: ", password) ||
+        !read_secret("Confirm root password: ", confirmation)) {
+      password.assign(password.size(), '\0');
+      confirmation.assign(confirmation.size(), '\0');
+      return false;
+    }
+    if (password.size() < 8) {
+      cerr << "Password must contain at least 8 characters." << endl;
+    } else if (password != confirmation) {
+      cerr << "Passwords do not match." << endl;
+    } else {
+      confirmation.assign(confirmation.size(), '\0');
+      return true;
+    }
+    password.assign(password.size(), '\0');
+    confirmation.assign(confirmation.size(), '\0');
+  }
+  cerr << "ERROR: password setup failed after 3 attempts." << endl;
+  return false;
+}
 
 void usage(const char *program)
 {
@@ -274,9 +355,14 @@ int main(int argc, char **argv)
   string temporary_root_password;
   bool catalog_created = false;
   if (the_process_param()->initialize()) {
-    const char *password_env = getenv("CSUDB_INITIAL_ROOT_PASSWORD");
+    string root_password;
+    if (!choose_initial_root_password(root_password)) {
+      cleanup();
+      return 1;
+    }
     string effective_password;
-    RC init_rc = DatabaseService::initialize_new(the_process_param()->data_dir(), password_env == nullptr ? "" : password_env, effective_password);
+    RC init_rc = DatabaseService::initialize_new(the_process_param()->data_dir(), root_password, effective_password);
+    root_password.assign(root_password.size(), '\0');
     if (init_rc == RC::FILE_EXIST) {
       cerr << "ERROR: CSUDB data directory is already initialized." << endl;
       cleanup();
@@ -291,8 +377,9 @@ int main(int argc, char **argv)
          << "Data directory : " << the_process_param()->data_dir() << endl
          << "System catalog : created" << endl
          << "Root user      : created" << endl
-         << "Temporary root password:" << endl << effective_password << endl
+         << "Root password  : configured by user" << endl
          << "Initialization complete." << endl;
+    effective_password.assign(effective_password.size(), '\0');
     cleanup();
     return 0;
   }
@@ -304,9 +391,9 @@ int main(int argc, char **argv)
     return 1;
   }
   if (catalog_created) {
-    cout << "CSUDB system catalog was initialized." << endl
-         << "Temporary root password: " << temporary_root_password << endl
-         << "Change it after the first login." << endl;
+    cerr << "ERROR: implicit catalog initialization is disabled; run 'csudbd --initialize'." << endl;
+    cleanup();
+    return 1;
   }
 
   g_server = init_server();
