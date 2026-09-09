@@ -31,7 +31,8 @@ DefaultHandler::DefaultHandler() {}
 DefaultHandler::~DefaultHandler() noexcept { destroy(); }
 
 RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const char *log_handler_name,
-    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy)
+    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy,
+    const char *page_io_backend)
 {
   // 检查目录是否存在，或者创建
   filesystem::path db_dir(base_dir);
@@ -49,6 +50,7 @@ RC DefaultHandler::init(const char *base_dir, const char *trx_kit_name, const ch
   storage_engine_ = storage_engine;
   buffer_pool_memory_size_ = buffer_pool_memory_size;
   buffer_pool_replacement_policy_ = buffer_pool_replacement_policy;
+  page_io_backend_ = page_io_backend;
 
   const char *sys_db = "sys";
 
@@ -103,7 +105,19 @@ RC DefaultHandler::create_db(const char *dbname)
   return RC::SUCCESS;
 }
 
-RC DefaultHandler::drop_db(const char *dbname) { return RC::INTERNAL; }
+RC DefaultHandler::drop_db(const char *dbname)
+{
+  if (nullptr == dbname || common::is_blank(dbname) || 0 == strcmp(dbname, "sys")) {
+    return RC::INVALID_ARGUMENT;
+  }
+  filesystem::path dbpath = db_dir_ / dbname;
+  if (!filesystem::is_directory(dbpath)) return RC::SCHEMA_DB_NOT_EXIST;
+  RC rc = close_db(dbname);
+  if (OB_FAIL(rc) && rc != RC::SCHEMA_DB_NOT_OPENED) return rc;
+  error_code ec;
+  filesystem::remove_all(dbpath, ec);
+  return ec ? RC::FILE_REMOVE : RC::SUCCESS;
+}
 
 RC DefaultHandler::open_db(const char *dbname)
 {
@@ -130,7 +144,8 @@ RC DefaultHandler::open_db(const char *dbname)
            log_handler_name_.c_str(),
            storage_engine_.c_str(),
            buffer_pool_memory_size_,
-           buffer_pool_replacement_policy_.c_str())) != RC::SUCCESS) {
+           buffer_pool_replacement_policy_.c_str(),
+           page_io_backend_.c_str())) != RC::SUCCESS) {
     LOG_ERROR("Failed to open db: %s. error=%s", dbname, strrc(ret));
     delete db;
   } else {
@@ -139,7 +154,16 @@ RC DefaultHandler::open_db(const char *dbname)
   return ret;
 }
 
-RC DefaultHandler::close_db(const char *dbname) { return RC::UNIMPLEMENTED; }
+RC DefaultHandler::close_db(const char *dbname)
+{
+  auto it = opened_dbs_.find(dbname == nullptr ? "" : dbname);
+  if (it == opened_dbs_.end()) return RC::SCHEMA_DB_NOT_OPENED;
+  RC rc = it->second->sync();
+  if (OB_FAIL(rc)) return rc;
+  delete it->second;
+  opened_dbs_.erase(it);
+  return RC::SUCCESS;
+}
 
 // TODO: remove DefaultHandler
 RC DefaultHandler::create_table(const char *dbname, const char *relation_name, span<const AttrInfoSqlNode> attributes)
@@ -188,4 +212,11 @@ RC DefaultHandler::sync()
     }
   }
   return rc;
+}
+
+vector<string> DefaultHandler::opened_databases() const
+{
+  vector<string> result;
+  for (const auto &entry : opened_dbs_) result.push_back(entry.first);
+  return result;
 }

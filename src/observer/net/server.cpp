@@ -94,7 +94,7 @@ void NetServer::accept(int fd)
     return;
   }
   stringstream address;
-  address << ip_addr << ":" << addr.sin_port;
+  address << ip_addr << ":" << ntohs(addr.sin_port);
   string addr_str = address.str();
 
   ret = set_non_block(client_fd);

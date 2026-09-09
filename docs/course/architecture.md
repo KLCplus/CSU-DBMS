@@ -45,17 +45,30 @@ MiniDB Baseline v0.1 保留 MiniOB 的分层架构，把三门课程放在同一
                               RecordPage / RID / slot
                                            |
                                            v
-                         DiskBufferPool / BPFrameManager
+                                  DiskBufferPool
                                            |
-                                  hit      |      miss
-                              in-memory Frame      |
-                                           |      v
-                                           +-- Page (8 KiB)
-                                                  |
-                                           lseek + read/write
-                                                  |
-                                                  v
-                                           data/index files
+                                           v
+                                  BPFrameManager
+                                           |
+                         +-----------------+-----------------+
+                         |                                   |
+                         v                                   v
+                  in-memory Frame                   ReplacementPolicy
+                         |                         /      |       \
+                         v                       LRU     FIFO    CLOCK
+                    Page (8 KiB)
+                         |
+                         v
+                  PageIOBackend
+                    /          \
+              legacy          positional
+       lseek + read/write     pread/pwrite
+                    \          /
+                         v
+                  Linux VFS / File System
+                         |
+                         v
+                    Disk / SSD
 ```
 
 横切能力：Session/Event 贯穿请求；Catalog/Metadata 参与语义绑定与优化；Transaction、CLog、Double Write Buffer 和 Recovery 贯穿写入与持久化。
@@ -110,14 +123,17 @@ MiniDB Baseline v0.1 保留 MiniOB 的分层架构，把三门课程放在同一
 
 - `Page` 是固定 8 KiB 的持久化单位，包含 LSN、checksum 和 data。
 - `Frame` 是 Page 的内存容器，附带 frame id、dirty、pin count、latch 和访问时间。
-- `BPFrameManager` 管理所有缓存 Frame，可选择 LRU 或 FIFO，并跳过仍被 pin 的页。
+- `BPFrameManager` 管理所有缓存 Frame，把淘汰元数据委托给可插拔 `ReplacementPolicy`；LRU、FIFO 和 CLOCK 都跳过仍被 pin 的页。
 - `DiskBufferPool` 对应一个磁盘文件，负责页分配、pin/unpin、加载和刷新。
 - `BufferPoolManager` 管理多个 DiskBufferPool。
-- `BufferPoolStats` 汇总命中、缺页、磁盘读写、淘汰、脏页淘汰和刷新次数。
+- `BufferPoolStats` 汇总命中、缺页、pin/unpin、无可用 Frame、目标文件字节数、I/O 延迟、淘汰、脏页与分类 Flush。
+- `BufferPoolSnapshot`/`FrameSnapshot` 是面向 CLI、GUI 和实验工具的只读 DTO，不暴露 Frame、Page 或锁。
 
 ### Disk / File
 
-`DiskBufferPool::load_page`/`write_page` 当前使用 `lseek + read/write` 访问表或索引文件。元数据使用文件流/系统调用写入；CLog 使用独立日志文件。这里是 OS I/O Trace 最自然的边界，也可以在后续实验中与 `pread/pwrite` 方案比较。
+`DiskBufferPool::load_page`/`write_page` 通过 `PageIOBackend` 访问表或索引分页文件。默认 legacy 使用 `lseek + read/write`；positional 使用可靠的 `preadn/pwriten`。元数据与 CLog 仍使用各自既有路径；它们不混入目标分页文件 I/O 统计。
+
+Linux VFS、具体文件系统和块设备属于 CSUDB 之外的操作系统边界；本项目调用它们提供的系统调用，并未自行实现 Linux VFS。
 
 ### Transaction、WAL 与 Recovery
 
@@ -158,6 +174,6 @@ benchmark、Docker 与 Dev Container 不属于请求执行链，但分别对后�
 
 1. 优先在 Stage 边界和现有抽象接口旁增加只读观测，不把 Trace 逻辑散落进算法主体。
 2. AST/Plan 可视化先实现序列化或 visitor，不改变节点所有权。
-3. Buffer/Page Trace 先记录 page id、命中、pin、dirty 与 I/O，再考虑替换算法插件化。
+3. Buffer/Page 扩展消费现有 Snapshot、Stats 和 `[BUFFER_POOL_TRACE]`；新策略实现 `ReplacementPolicy`，新文件访问方式实现 `PageIOBackend`。
 4. WAL/MVCC 实验沿用 `Trx`、`LogHandler`、`LogReplayer` 接口，不新造旁路文件格式。
 5. 每次触碰 Parser、Record、Buffer、B+Tree 或 Recovery，都要运行对应 unittest 和端到端 SQL 持久化测试。

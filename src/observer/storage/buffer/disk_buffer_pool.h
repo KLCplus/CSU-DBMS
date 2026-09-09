@@ -1,16 +1,4 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
 
-//
-// Created by Meiyi & Longda on 2021/4/13.
-//
 #pragma once
 
 #include <fcntl.h>
@@ -37,6 +25,9 @@ See the Mulan PSL v2 for more details. */
 #include "storage/buffer/page.h"
 #include "storage/buffer/buffer_pool_log.h"
 #include "storage/buffer/buffer_pool_stats.h"
+#include "storage/buffer/buffer_pool_diagnostics.h"
+#include "storage/buffer/page_io_backend.h"
+#include "storage/buffer/replacement/replacement_policy.h"
 
 class BufferPoolManager;
 class DiskBufferPool;
@@ -142,7 +133,10 @@ public:
    */
   size_t total_frame_num() const { return allocator_.get_size(); }
 
-  BufferPoolReplacementPolicy replacement_policy() const { return replacement_policy_; }
+  BufferPoolSnapshot snapshot(int buffer_pool_id = -1) const;
+
+  BufferPoolReplacementPolicy replacement_policy_type() const { return replacement_policy_type_; }
+  const ReplacementPolicy &replacement_policy() const { return *replacement_policy_; }
   BufferPoolStats            &stats() { return stats_; }
   const BufferPoolStats      &stats() const { return stats_; }
 
@@ -163,8 +157,10 @@ private:
   mutex          lock_;
   FrameLruCache  frames_;
   FrameAllocator allocator_;
-  BufferPoolReplacementPolicy replacement_policy_;
+  BufferPoolReplacementPolicy replacement_policy_type_;
+  unique_ptr<ReplacementPolicy> replacement_policy_;
   BufferPoolStats              stats_;
+  size_t                       capacity_ = 0;
 };
 
 /**
@@ -197,7 +193,7 @@ class DiskBufferPool final
 {
 public:
   DiskBufferPool(BufferPoolManager &bp_manager, BPFrameManager &frame_manager, DoubleWriteBuffer &dblwr_manager,
-      LogHandler &log_handler);
+      LogHandler &log_handler, PageIOBackendType io_backend_type);
   ~DiskBufferPool();
 
   /**
@@ -234,7 +230,7 @@ public:
    * 如果已经脏， 则刷到磁盘，除了pinned page
    */
   RC purge_page(PageNum page_num);
-  RC purge_all_pages();
+  RC purge_all_pages(FlushReason reason = FlushReason::SHUTDOWN);
 
   /**
    * @brief 用于解除pageHandle对应页面的驻留缓冲区限制
@@ -256,12 +252,20 @@ public:
   /**
    * 如果页面是脏的，就将数据刷新到double write buffer
    */
-  RC flush_page(Frame &frame);
+  RC flush_page(Frame &frame, FlushReason reason = FlushReason::EXPLICIT);
 
   /**
    * 刷新所有页面到double write buffer，即使pin count不是0
    */
   RC flush_all_pages();
+
+  /** 只刷新当前未被业务 pin 的脏页。max_pages=0 表示不限制数量。 */
+  RC flush_dirty_pages(size_t max_pages, DirtyPageFlushResult &result,
+      FlushReason reason = FlushReason::EXPLICIT);
+
+  BufferPoolSnapshot snapshot() const;
+  BufferPoolStatsSnapshot stats() const { return stats_.snapshot(); }
+  PageIOBackendType io_backend_type() const { return io_backend_->type(); }
 
   /**
    * 回放日志时处理page0中已被认定为不存在的page
@@ -287,7 +291,7 @@ protected:
   /**
    * 刷新指定页面到磁盘(flush)，并且释放关联的Frame
    */
-  RC purge_frame(PageNum page_num, Frame *used_frame);
+  RC purge_frame(PageNum page_num, Frame *used_frame, FlushReason reason = FlushReason::EXPLICIT);
   RC check_page_num(PageNum page_num);
 
   /**
@@ -298,13 +302,16 @@ protected:
   /**
    * 如果页面是脏的，就将数据刷新到磁盘
    */
-  RC flush_page_internal(Frame &frame);
+  RC flush_page_internal(Frame &frame, FlushReason reason);
+  void log_pinned_frames(const char *context, bool warning) const;
 
 private:
   BufferPoolManager   &bp_manager_;     /// BufferPool 管理器
   BPFrameManager      &frame_manager_;  /// Frame 管理器
   DoubleWriteBuffer   &dblwr_manager_;  /// Double Write Buffer 管理器
   BufferPoolLogHandler log_handler_;    /// BufferPool 日志处理器
+  unique_ptr<PageIOBackend> io_backend_;
+  BufferPoolStats stats_;                /// 当前分页文件的统计；全局统计仍由 FrameManager 持有
 
   int file_desc_ = -1;  /// 文件描述符
   /// 由于在最开始打开文件时，没有正确的buffer pool id不能加载header frame，所以单独从文件中读取此标识
@@ -330,7 +337,8 @@ class BufferPoolManager final
 {
 public:
   BufferPoolManager(int memory_size = 0,
-      BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU);
+      BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU,
+      PageIOBackendType io_backend_type = PageIOBackendType::LEGACY);
   ~BufferPoolManager();
 
   RC init(unique_ptr<DoubleWriteBuffer> dblwr_buffer);
@@ -339,13 +347,15 @@ public:
   RC open_file(LogHandler &log_handler, const char *file_name, DiskBufferPool *&bp);
   RC close_file(const char *file_name);
 
-  RC flush_page(Frame &frame);
+  RC flush_page(Frame &frame, FlushReason reason = FlushReason::EXPLICIT);
 
   BPFrameManager    &get_frame_manager() { return frame_manager_; }
   DoubleWriteBuffer *get_dblwr_buffer() { return dblwr_buffer_.get(); }
   BufferPoolStatsSnapshot stats() const { return frame_manager_.stats().snapshot(); }
   void reset_stats() { frame_manager_.stats().reset(); }
-  BufferPoolReplacementPolicy replacement_policy() const { return frame_manager_.replacement_policy(); }
+  BufferPoolReplacementPolicy replacement_policy() const { return frame_manager_.replacement_policy_type(); }
+  PageIOBackendType io_backend_type() const { return io_backend_type_; }
+  BufferPoolSnapshot snapshot() const;
 
   /**
    * @brief 根据ID获取对应的BufferPool对象
@@ -364,4 +374,5 @@ private:
   unordered_map<string, DiskBufferPool *>  buffer_pools_;
   unordered_map<int32_t, DiskBufferPool *> id_to_buffer_pools_;
   atomic<int32_t>                          next_buffer_pool_id_{1};  // 系统启动时，会打开所有的表，这样就可以知道当前系统最大的ID是多少了
+  PageIOBackendType                        io_backend_type_ = PageIOBackendType::LEGACY;
 };

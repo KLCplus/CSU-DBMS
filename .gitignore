@@ -28,6 +28,7 @@ docs/book
 .csudb_client_history
 .csudb_lsm_history
 csudb_data/
+csudb.log.*
 
 # ignore generated files
 src/observer/sql/parser/lex_sql.cpp

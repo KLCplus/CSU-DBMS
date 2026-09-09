@@ -56,13 +56,14 @@ public:
    * @param trx_kit_name 使用哪种类型的事务模型
    * @param storage_engine 存储引擎，目前只支持heap table 和 lsm-tree 两种
    * @param buffer_pool_memory_size Buffer Pool 可使用的页面内存字节数
-   * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo
+   * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo/clock
+   * @param page_io_backend 页文件 I/O 后端，支持 legacy/positional
    * @note 数据库不是放在dbpath/name下，是直接使用dbpath目录
    * @todo 支持多个 db，例如同一个db 都是相同的存储引擎。可参考 duckdb。
    */
   RC init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name,
       const char *storage_engine = "heap", int buffer_pool_memory_size = 0,
-      const char *buffer_pool_replacement_policy = "lru");
+      const char *buffer_pool_replacement_policy = "lru", const char *page_io_backend = "legacy");
 
   /**
    * @brief 创建一个表

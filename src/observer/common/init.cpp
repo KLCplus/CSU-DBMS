@@ -30,6 +30,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/default/default_handler.h"
 #include "storage/trx/trx.h"
 
+#include <filesystem>
+
 using namespace common;
 
 bool *&_get_init()
@@ -76,6 +78,13 @@ int init_log(ProcessParam *process_cfg, Ini &properties)
       cout << "Not set log file name, use default " << log_file_name << endl;
     } else {
       log_file_name = it->second;
+    }
+
+    if (!process_cfg->log_dir().empty()) {
+      std::error_code ec;
+      std::filesystem::create_directories(process_cfg->log_dir(), ec);
+      if (ec) return ec.value();
+      log_file_name = (std::filesystem::path(process_cfg->log_dir()) / (proc_name + ".log")).string();
     }
 
     log_file_name = getAboslutPath(log_file_name.c_str());
@@ -140,12 +149,30 @@ int init_global_objects(ProcessParam *process_param, Ini &properties)
 
   int ret = 0;
 
-  RC rc = GCTX.handler_->init("csudb_data",
+  int buffer_pool_memory_size = process_param->buffer_pool_memory_size();
+  string replacement_policy = process_param->buffer_pool_replacement_policy();
+  string io_backend = process_param->page_io_backend();
+  map<string, string> buffer_pool_section = properties.get("BUFFER_POOL");
+  auto config = buffer_pool_section.find("BUFFER_SIZE");
+  if (buffer_pool_memory_size <= 0 && config != buffer_pool_section.end()) {
+    str_to_val(config->second, buffer_pool_memory_size);
+  }
+  config = buffer_pool_section.find("REPLACEMENT_POLICY");
+  if (!process_param->buffer_pool_replacement_policy_specified() && config != buffer_pool_section.end()) {
+    replacement_policy = config->second;
+  }
+  config = buffer_pool_section.find("IO_BACKEND");
+  if (!process_param->page_io_backend_specified() && config != buffer_pool_section.end()) {
+    io_backend = config->second;
+  }
+
+  RC rc = GCTX.handler_->init(process_param->data_dir().c_str(),
                               process_param->trx_kit_name().c_str(),
                               process_param->durability_mode().c_str(),
                               process_param->storage_engine().c_str(),
-                              process_param->buffer_pool_memory_size(),
-                              process_param->buffer_pool_replacement_policy().c_str());
+                              buffer_pool_memory_size,
+                              replacement_policy.c_str(),
+                              io_backend.c_str());
   if (OB_FAIL(rc)) {
     LOG_ERROR("failed to init handler. rc=%s", strrc(rc));
     return -1;
@@ -185,10 +212,18 @@ int init(ProcessParam *process_param)
   // to avoid race condition
 
   // Read Configuration files
-  rc = get_properties()->load(process_param->get_conf());
-  if (rc) {
-    cerr << "Failed to load configuration files" << endl;
-    return rc;
+  const string &configuration_file = process_param->get_conf();
+  if (!configuration_file.empty() && std::filesystem::exists(configuration_file)) {
+    rc = get_properties()->load(configuration_file);
+    if (rc) {
+      cerr << "Failed to load configuration file: " << configuration_file << endl;
+      return rc;
+    }
+  } else if (process_param->conf_specified()) {
+    cerr << "Configuration file does not exist: " << configuration_file << endl;
+    return ENOENT;
+  } else {
+    cerr << "Warning: default configuration file is unavailable; using built-in defaults." << endl;
   }
 
   // Init tracer

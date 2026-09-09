@@ -1,99 +1,95 @@
-# CSU-DBMS CLI 使用指南
+# CSUDB 2026 CLI 使用指南
 
-## 1. 快速开始
+CSUDB 是客户端/服务端数据库。`csudbd` 负责 SQL、Session、Catalog、Executor 和 Storage；`csudb` 只负责连接、认证、输入与结果展示，不在客户端重复解析 SQL。
 
-在仓库根目录完成 Debug 构建，然后直接启动：
+## 1. 构建与初始化
 
 ```bash
 ./build.sh debug --make -j4
-./csudb
+
+env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
+  build_debug/bin/csudbd --initialize \
+  --config etc/csudb.ini \
+  --data-dir /tmp/csudb-course
 ```
 
-`./csudb` 会自动选择 Debug 构建产物、加载 `etc/csudb.ini` 并进入本地交互模式，不需要先启动服务器或手工填写 `-P cli`。
+初始化只执行一次。密码不会明文写入 Catalog；示例环境变量适合受控实验，使用后应通过 `ALTER USER` 更换。
 
-## 2. 进入界面
+## 2. 启动 Server
 
-正常启动后显示 CSU-DBMS 欢迎页和以下提示符：
+```bash
+build_debug/bin/csudbd \
+  --config etc/csudb.ini \
+  --data-dir /tmp/csudb-course \
+  --host 127.0.0.1 \
+  --port 6789
+```
+
+服务端默认绑定 `127.0.0.1`，默认协议是需要登录的 CSUDB native protocol。按 Ctrl+C 触发优雅退出。缓存实验参数也在服务端设置：
+
+```bash
+build_debug/bin/csudbd --data-dir /tmp/csudb-course \
+  --buffer-size 262144 --replacement clock --io-backend positional
+```
+
+## 3. 连接 Client
+
+```bash
+build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
+```
+
+密码无回显。连接成功后提示符是 `csudb [sys]>`；选择数据库后显示相应名称。输入可跨行，只有字符串外的分号或 `\g` 才提交。
 
 ```text
-csudb >
+csudb [school]> SELECT id,
+    -> name
+    -> FROM student
+    -> WHERE id = 1;
 ```
 
-常用交互：
-
-- `help;`：查看 SQL 示例。
-- `show tables;`：查看表。
-- `desc student;`：查看表结构。
-- `exit`、`bye`、`\q`：退出。
-- 上下方向键：浏览历史命令。
-
-建议 SQL 以分号结尾；当前 Shell 按一次输入提交一条语句。
-
-## 3. 第一次 SQL 会话
+## 4. 第一次会话
 
 ```sql
-CREATE TABLE student (id INT, name CHAR(20));
-INSERT INTO student VALUES (1, 'Alice');
-INSERT INTO student VALUES (2, 'Bob');
+CREATE DATABASE school;
+USE school;
+CREATE TABLE student (id INT, name CHAR(32), age INT);
+INSERT INTO student VALUES (1, 'Alice', 20);
+INSERT INTO student VALUES (2, 'Bob', 21);
 SELECT * FROM student;
-SELECT name FROM student WHERE id = 1;
 DELETE FROM student WHERE id = 1;
 SELECT * FROM student;
 ```
 
-退出后再次执行 `./csudb`，运行 `SELECT * FROM student;`，可以验证数据持久化。
+重新启动服务端并再次查询，可以验证 Database、Table、Record 和用户目录的持久化。
 
-## 4. 命令行参数
+## 5. Shell 常用功能
 
-```bash
-./csudb --help
-./csudb --version
-./csudb --buffer-size 262144 --replacement fifo
-./csudb --transaction mvcc --durable
-```
+- `\help`：显示全部已实现 Meta Command。
+- `\status`、`\server`：查看真实服务端/Session 配置。
+- `\buffer`、`\pages 20`：读取稳定 Buffer Pool Snapshot DTO。
+- `\timing on`：显示耗时。
+- `\source init.sql`、`\output result.txt`：执行脚本和重定向。
+- `\q`：退出。
 
-常用参数：
-
-| 参数 | 作用 |
-| --- | --- |
-| `--config PATH` | 指定配置文件 |
-| `--buffer-size BYTES` | 设置 Buffer Pool 容量 |
-| `--replacement lru\|fifo` | 选择页替换策略 |
-| `--transaction vacuous\|mvcc` | 选择事务模型 |
-| `--durable` | 启用磁盘日志持久化模式 |
-| `--engine heap\|lsm` | 选择存储引擎 |
-
-## 5. 网络模式
-
-终端一启动服务：
+批处理与脚本：
 
 ```bash
-./csudb server --port 6789
+csudb -u root -p school -e "SELECT * FROM student;"
+csudb -u root -p -D school -f report.sql --batch
+csudb -u root -p school < report.sql
+csudb --ping
 ```
 
-终端二连接：
+历史保存在 `~/.csudb/history`。包含 `IDENTIFIED BY` 或 `PASSWORD` 的输入不会写入历史。Profile 文件位于 `~/.csudb/config.toml`，可参考 `etc/csudb-client.toml`；配置文件不支持保存密码。
+
+## 6. 安装
 
 ```bash
-build_debug/bin/csudb-client -h 127.0.0.1 -p 6789
+cmake --install build_debug --prefix "$HOME/.local"
+# 或
+CSUDB_BUILD_DIR="$PWD/build_debug" ./scripts/install.sh --user
 ```
 
-兼容可执行文件 `observer` 和 `obclient` 暂时保留，方便旧测试与脚本继续运行；新开发和演示统一使用 `csudb`、`csudb-client`。
+把 `~/.local/bin` 加入 PATH 后，可在任意目录执行 `csudb` 和 `csudbd`。卸载执行 `./scripts/uninstall.sh --user`；脚本不会删除数据库 data-dir。
 
-## 6. 文件位置
-
-| 路径 | 内容 |
-| --- | --- |
-| `csudb_data/db/sys/` | 默认数据库和表文件 |
-| `.csudb_history` | 本地 Shell 历史 |
-| `.csudb_client_history` | 网络客户端历史 |
-| `csudb.log.<日期>` | 运行、Buffer Pool Trace 和错误日志 |
-| `etc/csudb.ini` | 默认配置 |
-
-数据目录相对于启动时的工作目录。需要隔离实验数据时，在独立目录中直接运行仓库内的绝对路径 `build_debug/bin/csudb`。
-
-## 7. 常见问题
-
-- 提示找不到 `build_debug/bin/csudb`：先执行 `./build.sh debug --make -j4`。
-- 配置加载失败：优先从仓库根目录使用 `./csudb`；包装脚本会自动传入正确配置。
-- 建表提示表已存在：数据是持久化的，可更换表名，或在确认不再需要数据后清理对应实验运行目录。
-- 需要观察缓存行为：使用 `--replacement fifo`/`lru` 和较小的 `--buffer-size`，再查看 `csudb.log.<日期>`。
+参数、SQL 能力边界与 Planned 项目以 `docs/product/COMMANDS.md` 为准。

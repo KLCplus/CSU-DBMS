@@ -84,7 +84,11 @@ See the Mulan PSL v2 for more details. */
   DEFINE_RC(INVALID_TOKEN)               \
   DEFINE_RC(UNEXPECTED_END_OF_STRING)    \
   DEFINE_RC(SYNTAX_ERROR)                \
-  DEFINE_RC(UNSUPPORTED)
+  DEFINE_RC(UNSUPPORTED)                 \
+  DEFINE_RC(AUTHENTICATION_FAILED)       \
+  DEFINE_RC(AUTHORIZATION_DENIED)        \
+  DEFINE_RC(USER_EXIST)                  \
+  DEFINE_RC(USER_NOT_EXIST)
 
 enum class RC
 {

@@ -13,6 +13,7 @@ See the Mulan PSL v2 for more details. */
 //
 
 #include "storage/buffer/frame.h"
+#include "storage/buffer/buffer_pool_stats.h"
 #include "session/session.h"
 #include "session/thread_data.h"
 
@@ -214,6 +215,9 @@ void Frame::pin()
 
   [[maybe_unused]] intptr_t xid       = get_default_debug_xid();
   [[maybe_unused]] int      pin_count = ++pin_count_;
+  if (stats_ != nullptr) {
+    stats_->record_pin(pin_count == 1);
+  }
 
   TRACE("after frame pin. "
         "this=%p, write locker=%lx, read locker has xid %d? pin=%d, frameId=%s, xid=%lx, lbt=%s",
@@ -233,6 +237,9 @@ int Frame::unpin()
   scoped_lock debug_lock(debug_lock_);
 
   int pin_count = --pin_count_;
+  if (stats_ != nullptr) {
+    stats_->record_unpin(pin_count == 0);
+  }
   TRACE("after frame unpin. "
         "this=%p, write locker=%lx, read locker has xid? %d, pin=%d, frameId=%s, xid=%lx, lbt=%s",
         this, write_locker_, read_lockers_.find(xid) != read_lockers_.end(), 
@@ -257,6 +264,26 @@ unsigned long current_time()
 }
 
 void Frame::access() { acc_time_ = current_time(); }
+
+void Frame::mark_dirty()
+{
+  if (!dirty_) {
+    dirty_ = true;
+    if (stats_ != nullptr) {
+      stats_->record_dirty();
+    }
+  }
+}
+
+void Frame::clear_dirty()
+{
+  if (dirty_) {
+    dirty_ = false;
+    if (stats_ != nullptr) {
+      stats_->record_clean();
+    }
+  }
+}
 
 string Frame::to_string() const
 {

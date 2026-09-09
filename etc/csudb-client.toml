@@ -1,0 +1,11 @@
+[default]
+host = "127.0.0.1"
+port = 6789
+user = "root"
+
+[profile.local]
+host = "127.0.0.1"
+port = 6789
+user = "root"
+
+# Passwords are deliberately unsupported in this file. Use `csudb -p`.

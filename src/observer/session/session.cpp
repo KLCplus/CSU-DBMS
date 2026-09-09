@@ -18,13 +18,29 @@ See the Mulan PSL v2 for more details. */
 #include "storage/default/default_handler.h"
 #include "storage/trx/trx.h"
 
+#include <atomic>
+#include <ctime>
+
+namespace {
+std::atomic<uint64_t> next_session_id{1};
+}
+
+Session::Session()
+    : session_id_(next_session_id.fetch_add(1)), connected_at_epoch_seconds_(static_cast<uint64_t>(time(nullptr)))
+{}
+
 Session &Session::default_session()
 {
   static Session session;
   return session;
 }
 
-Session::Session(const Session &other) : db_(other.db_) {}
+Session::Session(const Session &other)
+    : session_id_(next_session_id.fetch_add(1)), username_(other.username_),
+      connected_at_epoch_seconds_(static_cast<uint64_t>(time(nullptr))), authenticated_(other.authenticated_),
+      db_(other.db_), sql_debug_(other.sql_debug_), hash_join_(other.hash_join_), use_cascade_(other.use_cascade_),
+      execution_mode_(other.execution_mode_)
+{}
 
 Session::~Session()
 {

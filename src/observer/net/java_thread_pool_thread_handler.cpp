@@ -115,7 +115,11 @@ void JavaThreadPoolThreadHandler::handle_event(EventCallbackAg *ag)
   auto sql_handler = [this, ag]() {
     RC rc = sql_task_handler_.handle_event(ag->communicator); // 这里会有接收消息、处理请求然后返回结果一条龙服务
     if (RC::SUCCESS != rc) {
-      LOG_WARN("failed to handle sql task. rc=%s", strrc(rc));
+      if (rc == RC::IOERR_CLOSE) {
+        LOG_TRACE("client disconnected. communicator=%p", ag->communicator);
+      } else {
+        LOG_WARN("failed to handle sql task. rc=%s", strrc(rc));
+      }
       this->close_connection(ag->communicator);
     } else if (0 != event_add(ag->ev, nullptr)) {
       // 由于我们在创建事件对象时没有增加 EV_PERSIST flag，所以我们每次都要处理完成后再把事件加回到event_base中。

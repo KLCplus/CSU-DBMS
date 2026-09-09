@@ -35,7 +35,7 @@ public:
   static Session &default_session();
 
 public:
-  Session() = default;
+  Session();
   ~Session();
 
   Session(const Session &other);
@@ -95,6 +95,22 @@ public:
 
   void set_used_chunk_mode(bool used_chunk_mode) { used_chunk_mode_ = used_chunk_mode; }
 
+  uint64_t session_id() const { return session_id_; }
+  void set_authenticated(bool value) { authenticated_ = value; }
+  bool authenticated() const { return authenticated_; }
+  void set_identity(uint64_t user_id, const string &username)
+  {
+    user_id_ = user_id;
+    username_ = username;
+    authenticated_ = true;
+  }
+  uint64_t user_id() const { return user_id_; }
+  const string &username() const { return username_; }
+  void set_client_address(const string &address) { client_address_ = address; }
+  const string &client_address() const { return client_address_; }
+  uint64_t connected_at_epoch_seconds() const { return connected_at_epoch_seconds_; }
+  bool autocommit() const { return !trx_multi_operation_mode_; }
+
   /**
    * @brief 将指定会话设置到线程变量中
    *
@@ -108,6 +124,12 @@ public:
   static Session *current_session();
 
 private:
+  uint64_t      session_id_ = 0;
+  uint64_t      user_id_ = 0;
+  string        username_;
+  string        client_address_;
+  uint64_t      connected_at_epoch_seconds_ = 0;
+  bool          authenticated_ = false;
   Db           *db_              = nullptr;
   Trx          *trx_             = nullptr;
   SessionEvent *current_request_ = nullptr;  ///< 当前正在处理的请求

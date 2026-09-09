@@ -1,18 +1,7 @@
-/* Copyright (c) 2021 Xie Meiyi(xiemeiyi@hust.edu.cn) and OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
 
-//
-// Created by Meiyi & Longda on 2021/4/13.
-//
 #include <errno.h>
 #include <string.h>
+#include <chrono>
 
 #include "common/io/io.h"
 #include "common/lang/mutex.h"
@@ -39,13 +28,16 @@ string BPFileHeader::to_string() const
 ////////////////////////////////////////////////////////////////////////////////
 
 BPFrameManager::BPFrameManager(const char *name, BufferPoolReplacementPolicy replacement_policy)
-    : allocator_(name), replacement_policy_(replacement_policy)
+    : allocator_(name),
+      replacement_policy_type_(replacement_policy),
+      replacement_policy_(create_replacement_policy(replacement_policy))
 {}
 
 RC BPFrameManager::init(int pool_num, int item_num_per_pool)
 {
   int ret = allocator_.init(false, pool_num, item_num_per_pool);
   if (ret == 0) {
+    capacity_ = static_cast<size_t>(pool_num) * static_cast<size_t>(item_num_per_pool);
     return RC::SUCCESS;
   }
   return RC::NOMEM;
@@ -71,18 +63,24 @@ int BPFrameManager::purge_frames(int count, function<RC(Frame *frame)> purger)
   }
   frames_can_purge.reserve(count);
 
-  auto purge_finder = [&frames_can_purge, count](const FrameId &frame_id, Frame *const frame) {
-    if (frame->can_purge()) {
-      frame->pin();
-      frames_can_purge.push_back(frame);
-      if (frames_can_purge.size() >= static_cast<size_t>(count)) {
-        return false;  // false to break the progress
-      }
-    }
-    return true;  // true continue to look up
+  auto is_replaceable = [this](const FrameId &frame_id) {
+    Frame *frame = nullptr;
+    return frames_.peek(frame_id, frame) && frame != nullptr && frame->can_purge();
   };
 
-  frames_.foreach_reverse(purge_finder);
+  while (frames_can_purge.size() < static_cast<size_t>(count)) {
+    FrameId victim;
+    if (!replacement_policy_->choose_victim(is_replaceable, victim)) {
+      break;
+    }
+    Frame *frame = nullptr;
+    if (!frames_.peek(victim, frame) || frame == nullptr || !frame->can_purge()) {
+      break;
+    }
+    frame->pin();
+    replacement_policy_->on_pin(victim);
+    frames_can_purge.push_back(frame);
+  }
   LOG_INFO("purge frames find %ld pages total", frames_can_purge.size());
 
   /// 当前还在frameManager的锁内，而 purger 是一个非常耗时的操作
@@ -93,8 +91,9 @@ int BPFrameManager::purge_frames(int count, function<RC(Frame *frame)> purger)
     RC rc = purger(frame);
     if (RC::SUCCESS == rc) {
       stats_.record_eviction(dirty);
-      LOG_TRACE("[BUFFER_POOL_TRACE] event=EVICT policy=%s buffer_pool_id=%d page_num=%d dirty=%d",
-          buffer_pool_replacement_policy_name(replacement_policy_),
+      LOG_TRACE("[BUFFER_POOL_TRACE] event=EVICT event_seq=%llu policy=%s frame_id=%s buffer_pool_id=%d page_num=%d dirty=%d",
+          static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+          replacement_policy_->name(), frame->frame_id().to_string().c_str(),
           frame->buffer_pool_id(),
           frame->page_num(),
           dirty);
@@ -102,6 +101,7 @@ int BPFrameManager::purge_frames(int count, function<RC(Frame *frame)> purger)
       freed_count++;
     } else {
       frame->unpin();
+      replacement_policy_->on_unpin(frame->frame_id());
       LOG_WARN("failed to purge frame. frame_id=%s, rc=%s", 
                frame->frame_id().to_string().c_str(), strrc(rc));
     }
@@ -121,13 +121,11 @@ Frame *BPFrameManager::get(int buffer_pool_id, PageNum page_num)
 Frame *BPFrameManager::get_internal(const FrameId &frame_id)
 {
   Frame *frame = nullptr;
-  if (replacement_policy_ == BufferPoolReplacementPolicy::LRU) {
-    (void)frames_.get(frame_id, frame);
-  } else {
-    (void)frames_.peek(frame_id, frame);
-  }
+  (void)frames_.peek(frame_id, frame);
   if (frame != nullptr) {
+    replacement_policy_->on_access(frame_id);
     frame->pin();
+    replacement_policy_->on_pin(frame_id);
     LOG_DEBUG("got a frame. frame=%s", frame->to_string().c_str());
   }
   return frame;
@@ -150,8 +148,11 @@ Frame *BPFrameManager::alloc(int buffer_pool_id, PageNum page_num)
            frame->to_string().c_str());
     frame->set_buffer_pool_id(buffer_pool_id);
     frame->set_page_num(page_num);
+    frame->set_stats(&stats_);
     frame->pin();
     frames_.put(frame_id, frame);
+    replacement_policy_->on_insert(frame_id);
+    replacement_policy_->on_pin(frame_id);
     LOG_DEBUG("allocate a new frame. frame=%s", frame->to_string().c_str());
   }
   return frame;
@@ -168,14 +169,18 @@ RC BPFrameManager::free(int buffer_pool_id, PageNum page_num, Frame *frame)
 RC BPFrameManager::free_internal(const FrameId &frame_id, Frame *frame)
 {
   Frame                *frame_source = nullptr;
-  [[maybe_unused]] bool found        = frames_.get(frame_id, frame_source);
+  [[maybe_unused]] bool found        = frames_.peek(frame_id, frame_source);
   ASSERT(found && frame == frame_source && frame->pin_count() == 1,
       "failed to free frame. found=%d, frameId=%s, frame_source=%p, frame=%p, pinCount=%d, lbt=%s",
       found, frame_id.to_string().c_str(), frame_source, frame, frame->pin_count(), lbt());
 
+  frame->clear_dirty();
   frame->set_page_num(-1);
   frame->unpin();
+  replacement_policy_->on_unpin(frame_id);
+  replacement_policy_->on_remove(frame_id);
   frames_.remove(frame_id);
+  frame->set_stats(nullptr);
   allocator_.free(frame);
   return RC::SUCCESS;
 }
@@ -185,15 +190,49 @@ list<Frame *> BPFrameManager::find_list(int buffer_pool_id)
   lock_guard<mutex> lock_guard(lock_);
 
   list<Frame *> frames;
-  auto               fetcher = [&frames, buffer_pool_id](const FrameId &frame_id, Frame *const frame) -> bool {
+  auto               fetcher = [this, &frames, buffer_pool_id](const FrameId &frame_id, Frame *const frame) -> bool {
     if (buffer_pool_id == frame_id.buffer_pool_id()) {
       frame->pin();
+      replacement_policy_->on_pin(frame_id);
       frames.push_back(frame);
     }
     return true;
   };
   frames_.foreach (fetcher);
   return frames;
+}
+
+BufferPoolSnapshot BPFrameManager::snapshot(int buffer_pool_id) const
+{
+  lock_guard<mutex> lock_guard(const_cast<mutex &>(lock_));
+
+  BufferPoolSnapshot result;
+  result.capacity = capacity_;
+  result.free_frames = capacity_ > frames_.count() ? capacity_ - frames_.count() : 0;
+  result.replacement_policy = replacement_policy_->name();
+
+  auto collector = [this, buffer_pool_id, &result](const FrameId &frame_id, Frame *const frame) {
+    if (buffer_pool_id >= 0 && frame_id.buffer_pool_id() != buffer_pool_id) {
+      return true;
+    }
+    FrameSnapshot item;
+    item.frame_id = frame_id.to_string();
+    item.buffer_pool_id = frame_id.buffer_pool_id();
+    item.page_num = frame_id.page_num();
+    item.pin_count = frame->pin_count();
+    item.dirty = frame->dirty();
+    item.replaceable = frame->can_purge();
+    item.last_access_ns = frame->last_access_ns();
+    item.policy_metadata = replacement_policy_->metadata(frame_id);
+    result.frames.push_back(std::move(item));
+    ++result.used_frames;
+    result.pinned_frames += frame->pin_count() > 0 ? 1 : 0;
+    result.dirty_frames += frame->dirty() ? 1 : 0;
+    return true;
+  };
+  const_cast<FrameLruCache &>(frames_).foreach(collector);
+  result.stats = stats_.snapshot();
+  return result;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -229,8 +268,13 @@ RC BufferPoolIterator::reset()
 
 ////////////////////////////////////////////////////////////////////////////////
 DiskBufferPool::DiskBufferPool(
-    BufferPoolManager &bp_manager, BPFrameManager &frame_manager, DoubleWriteBuffer &dblwr_manager, LogHandler &log_handler)
-    : bp_manager_(bp_manager), frame_manager_(frame_manager), dblwr_manager_(dblwr_manager), log_handler_(*this, log_handler)
+    BufferPoolManager &bp_manager, BPFrameManager &frame_manager, DoubleWriteBuffer &dblwr_manager,
+    LogHandler &log_handler, PageIOBackendType io_backend_type)
+    : bp_manager_(bp_manager),
+      frame_manager_(frame_manager),
+      dblwr_manager_(dblwr_manager),
+      log_handler_(*this, log_handler),
+      io_backend_(create_page_io_backend(io_backend_type))
 {}
 
 DiskBufferPool::~DiskBufferPool()
@@ -252,18 +296,23 @@ RC DiskBufferPool::open_file(const char *file_name)
   file_desc_ = fd;
 
   Page header_page;
-  int ret = readn(file_desc_, &header_page, sizeof(header_page));
-  if (ret != 0) {
-    LOG_ERROR("Failed to read first page of %s, due to %s.", file_name, strerror(errno));
+  const auto read_start = std::chrono::steady_clock::now();
+  RC rc = io_backend_->read_page(file_desc_, file_name_.c_str(), BP_HEADER_PAGE, header_page);
+  const uint64_t read_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - read_start).count();
+  if (rc != RC::SUCCESS) {
+    LOG_ERROR("Failed to read first page of %s, rc=%s.", file_name, strrc(rc));
     close(fd);
     file_desc_ = -1;
-    return RC::IOERR_READ;
+    return rc;
   }
+  frame_manager_.stats().record_disk_read(BP_PAGE_SIZE, read_ns);
+  stats_.record_disk_read(BP_PAGE_SIZE, read_ns);
 
   BPFileHeader *tmp_file_header = reinterpret_cast<BPFileHeader *>(header_page.data);
   buffer_pool_id_ = tmp_file_header->buffer_pool_id;
 
-  RC rc = allocate_frame(BP_HEADER_PAGE, &hdr_frame_);
+  rc = allocate_frame(BP_HEADER_PAGE, &hdr_frame_);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("failed to allocate frame for header. file name %s", file_name_.c_str());
     close(fd);
@@ -276,7 +325,7 @@ RC DiskBufferPool::open_file(const char *file_name)
 
   if ((rc = load_page(BP_HEADER_PAGE, hdr_frame_)) != RC::SUCCESS) {
     LOG_ERROR("Failed to load first page of %s, due to %s.", file_name, strerror(errno));
-    purge_frame(BP_HEADER_PAGE, hdr_frame_);
+    purge_frame(BP_HEADER_PAGE, hdr_frame_, FlushReason::OTHER);
     close(fd);
     file_desc_ = -1;
     return rc;
@@ -296,10 +345,11 @@ RC DiskBufferPool::close_file()
     return rc;
   }
 
-  hdr_frame_->unpin();
+  unpin_page(hdr_frame_);
+  log_pinned_frames("shutdown", true);
 
   // TODO: 理论上是在回放时回滚未提交事务，但目前没有undo log，因此不下刷数据page，只通过redo log回放
-  rc = purge_all_pages();
+  rc = purge_all_pages(FlushReason::SHUTDOWN);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("failed to close %s, due to failed to purge pages. rc=%s", file_name_.c_str(), strrc(rc));
     return rc;
@@ -332,19 +382,25 @@ RC DiskBufferPool::get_this_page(PageNum page_num, Frame **frame)
   Frame *used_match_frame = frame_manager_.get(id(), page_num);
   if (used_match_frame != nullptr) {
     frame_manager_.stats().record_page_request(true);
-    LOG_TRACE("[BUFFER_POOL_TRACE] event=HIT policy=%s buffer_pool_id=%d page_num=%d pin_count=%d",
-        buffer_pool_replacement_policy_name(frame_manager_.replacement_policy()),
-        id(),
-        page_num,
-        used_match_frame->pin_count());
+    stats_.record_page_request(true);
+    stats_.record_pin(used_match_frame->pin_count() == 1);
+    LOG_TRACE("[BUFFER_POOL_TRACE] event=HIT event_seq=%llu policy=%s io_backend=%s frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+        static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+        frame_manager_.replacement_policy().name(), page_io_backend_name(io_backend_type()),
+        used_match_frame->frame_id().to_string().c_str(), id(), page_num, used_match_frame->pin_count());
+    LOG_TRACE("[BUFFER_POOL_TRACE] event=PIN event_seq=%llu frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+        static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+        used_match_frame->frame_id().to_string().c_str(), id(), page_num, used_match_frame->pin_count());
     used_match_frame->access();
     *frame = used_match_frame;
     return RC::SUCCESS;
   }
 
   frame_manager_.stats().record_page_request(false);
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=MISS policy=%s buffer_pool_id=%d page_num=%d",
-      buffer_pool_replacement_policy_name(frame_manager_.replacement_policy()), id(), page_num);
+  stats_.record_page_request(false);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=MISS event_seq=%llu policy=%s io_backend=%s buffer_pool_id=%d page_num=%d",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+      frame_manager_.replacement_policy().name(), page_io_backend_name(io_backend_type()), id(), page_num);
 
   scoped_lock lock_guard(lock_);  // 直接加了一把大锁，其实可以根据访问的页面来细化提高并行度
 
@@ -363,11 +419,15 @@ RC DiskBufferPool::get_this_page(PageNum page_num, Frame **frame)
 
   if ((rc = load_page(page_num, allocated_frame)) != RC::SUCCESS) {
     LOG_ERROR("Failed to load page %s:%d", file_name_.c_str(), page_num);
-    purge_frame(page_num, allocated_frame);
+    purge_frame(page_num, allocated_frame, FlushReason::OTHER);
     return rc;
   }
 
   *frame = allocated_frame;
+  stats_.record_pin(allocated_frame->pin_count() == 1);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=PIN event_seq=%llu frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+      allocated_frame->frame_id().to_string().c_str(), id(), page_num, allocated_frame->pin_count());
   return RC::SUCCESS;
 }
 
@@ -398,7 +458,9 @@ RC DiskBufferPool::allocate_page(Frame **frame)
         hdr_frame_->set_lsn(lsn);
 
         frame_manager_.stats().record_page_allocation();
-        LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE buffer_pool_id=%d page_num=%d reused=1", id(), i);
+        stats_.record_page_allocation();
+        LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE event_seq=%llu buffer_pool_id=%d page_num=%d reused=1",
+            static_cast<unsigned long long>(next_buffer_pool_event_sequence()), id(), i);
 
         LOG_DEBUG("allocate a new page without extend buffer pool. page num=%d, buffer pool=%d", i, id());
 
@@ -448,7 +510,7 @@ RC DiskBufferPool::allocate_page(Frame **frame)
   allocated_frame->set_page_num(file_header_->page_count - 1);
 
   // Use flush operation to extension file
-  if ((rc = flush_page_internal(*allocated_frame)) != RC::SUCCESS) {
+  if ((rc = flush_page_internal(*allocated_frame, FlushReason::OTHER)) != RC::SUCCESS) {
     LOG_WARN("Failed to alloc page %s , due to failed to extend one page.", file_name_.c_str());
     // skip return false, delay flush the extended page
     // return tmp;
@@ -457,8 +519,14 @@ RC DiskBufferPool::allocate_page(Frame **frame)
   lock_.unlock();
 
   *frame = allocated_frame;
+  stats_.record_pin(allocated_frame->pin_count() == 1);
   frame_manager_.stats().record_page_allocation();
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE buffer_pool_id=%d page_num=%d reused=0", id(), page_num);
+  stats_.record_page_allocation();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=ALLOCATE event_seq=%llu buffer_pool_id=%d page_num=%d reused=0",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()), id(), page_num);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=PIN event_seq=%llu frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+      allocated_frame->frame_id().to_string().c_str(), id(), page_num, allocated_frame->pin_count());
   return RC::SUCCESS;
 }
 
@@ -491,17 +559,23 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
   char tmp = 1 << (page_num % 8);
   file_header_->bitmap[page_num / 8] &= ~tmp;
   frame_manager_.stats().record_page_disposal();
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISPOSE buffer_pool_id=%d page_num=%d", id(), page_num);
+  stats_.record_page_disposal();
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISPOSE event_seq=%llu buffer_pool_id=%d page_num=%d",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()), id(), page_num);
   return RC::SUCCESS;
 }
 
 RC DiskBufferPool::unpin_page(Frame *frame)
 {
-  frame->unpin();
+  const int pin_count = frame->unpin();
+  stats_.record_unpin(pin_count == 0);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=UNPIN event_seq=%llu frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+      frame->frame_id().to_string().c_str(), frame->buffer_pool_id(), frame->page_num(), pin_count);
   return RC::SUCCESS;
 }
 
-RC DiskBufferPool::purge_frame(PageNum page_num, Frame *buf)
+RC DiskBufferPool::purge_frame(PageNum page_num, Frame *buf, FlushReason reason)
 {
   if (buf->pin_count() != 1) {
     LOG_INFO("Begin to free page %d frame_id=%s, but it's pin count > 1:%d.",
@@ -510,7 +584,7 @@ RC DiskBufferPool::purge_frame(PageNum page_num, Frame *buf)
   }
 
   if (buf->dirty()) {
-    RC rc = flush_page_internal(*buf);
+    RC rc = flush_page_internal(*buf, reason);
     if (rc != RC::SUCCESS) {
       LOG_WARN("Failed to flush page %d frame_id=%s during purge page.", buf->page_num(), buf->frame_id().to_string().c_str());
       return rc;
@@ -528,13 +602,13 @@ RC DiskBufferPool::purge_page(PageNum page_num)
 
   Frame           *used_frame = frame_manager_.get(id(), page_num);
   if (used_frame != nullptr) {
-    return purge_frame(page_num, used_frame);
+    return purge_frame(page_num, used_frame, FlushReason::EXPLICIT);
   }
 
   return RC::SUCCESS;
 }
 
-RC DiskBufferPool::purge_all_pages()
+RC DiskBufferPool::purge_all_pages(FlushReason reason)
 {
   list<Frame *> used = frame_manager_.find_list(id());
 
@@ -542,7 +616,7 @@ RC DiskBufferPool::purge_all_pages()
   for (list<Frame *>::iterator it = used.begin(); it != used.end(); ++it) {
     Frame *frame = *it;
 
-    purge_frame(frame->page_num(), frame);
+    purge_frame(frame->page_num(), frame, reason);
   }
   return RC::SUCCESS;
 }
@@ -566,17 +640,18 @@ RC DiskBufferPool::check_all_pages_unpinned()
   return RC::SUCCESS;
 }
 
-RC DiskBufferPool::flush_page(Frame &frame)
+RC DiskBufferPool::flush_page(Frame &frame, FlushReason reason)
 {
   scoped_lock lock_guard(lock_);
-  return flush_page_internal(frame);
+  return flush_page_internal(frame, reason);
 }
 
-RC DiskBufferPool::flush_page_internal(Frame &frame)
+RC DiskBufferPool::flush_page_internal(Frame &frame, FlushReason reason)
 {
   // The better way is use mmap the block into memory,
   // so it is easier to flush data to file.
 
+  const auto flush_start = std::chrono::steady_clock::now();
   RC rc = log_handler_.flush_page(frame.page());
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to log flush frame= %s, rc=%s", frame.to_string().c_str(), strrc(rc));
@@ -591,9 +666,14 @@ RC DiskBufferPool::flush_page_internal(Frame &frame)
   }
 
   frame.clear_dirty();
-  frame_manager_.stats().record_flush();
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=FLUSH buffer_pool_id=%d page_num=%d",
-      frame.buffer_pool_id(), frame.page_num());
+  const uint64_t duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - flush_start).count();
+  frame_manager_.stats().record_flush(reason, duration_ns);
+  stats_.record_flush(reason, duration_ns);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=FLUSH event_seq=%llu frame_id=%s buffer_pool_id=%d page_num=%d flush_reason=%s duration_ns=%llu",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()), frame.frame_id().to_string().c_str(),
+      frame.buffer_pool_id(), frame.page_num(), flush_reason_name(reason),
+      static_cast<unsigned long long>(duration_ns));
   LOG_DEBUG("Flush block. file desc=%d, frame=%s", file_desc_, frame.to_string().c_str());
 
   return RC::SUCCESS;
@@ -603,7 +683,7 @@ RC DiskBufferPool::flush_all_pages()
 {
   list<Frame *> used = frame_manager_.find_list(id());
   for (Frame *frame : used) {
-    RC rc = flush_page(*frame);
+    RC rc = flush_page(*frame, FlushReason::EXPLICIT);
     frame->unpin();
     if (rc != RC::SUCCESS) {
       LOG_WARN("failed to flush all pages");
@@ -611,6 +691,40 @@ RC DiskBufferPool::flush_all_pages()
     }
   }
   return RC::SUCCESS;
+}
+
+RC DiskBufferPool::flush_dirty_pages(size_t max_pages, DirtyPageFlushResult &result, FlushReason reason)
+{
+  result = {};
+  RC first_error = RC::SUCCESS;
+  list<Frame *> frames = frame_manager_.find_list(id());
+
+  for (Frame *frame : frames) {
+    const bool limit_reached = max_pages > 0 && result.flushed_count >= max_pages;
+    if (!frame->dirty() || limit_reached) {
+      frame->unpin();
+      continue;
+    }
+
+    // find_list 为快照临时增加了一个 pin，因此 1 表示此前没有业务持有者。
+    if (frame->pin_count() != 1) {
+      ++result.skipped_pinned_count;
+      frame->unpin();
+      continue;
+    }
+
+    RC rc = flush_page(*frame, reason);
+    frame->unpin();
+    if (rc == RC::SUCCESS) {
+      ++result.flushed_count;
+    } else {
+      ++result.failed_count;
+      if (first_error == RC::SUCCESS) {
+        first_error = rc;
+      }
+    }
+  }
+  return first_error;
 }
 
 RC DiskBufferPool::recover_page(PageNum page_num)
@@ -632,20 +746,19 @@ RC DiskBufferPool::recover_page(PageNum page_num)
 RC DiskBufferPool::write_page(PageNum page_num, Page &page)
 {
   scoped_lock lock_guard(wr_lock_);
-  int64_t     offset = ((int64_t)page_num) * sizeof(Page);
-  if (lseek(file_desc_, offset, SEEK_SET) == -1) {
-    LOG_ERROR("Failed to write page %lld of %d due to failed to seek %s.", offset, file_desc_, strerror(errno));
-    return RC::IOERR_SEEK;
+  const auto write_start = std::chrono::steady_clock::now();
+  RC rc = io_backend_->write_page(file_desc_, file_name_.c_str(), page_num, page);
+  const uint64_t duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - write_start).count();
+  if (rc != RC::SUCCESS) {
+    return rc;
   }
 
-  if (writen(file_desc_, &page, sizeof(Page)) != 0) {
-    LOG_ERROR("Failed to write page %lld of %d due to %s.", offset, file_desc_, strerror(errno));
-    return RC::IOERR_WRITE;
-  }
-
-  frame_manager_.stats().record_disk_write();
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_WRITE buffer_pool_id=%d page_num=%d bytes=%d",
-      id(), page_num, BP_PAGE_SIZE);
+  frame_manager_.stats().record_disk_write(BP_PAGE_SIZE, duration_ns);
+  stats_.record_disk_write(BP_PAGE_SIZE, duration_ns);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_WRITE event_seq=%llu io_backend=%s buffer_pool_id=%d page_num=%d bytes=%d duration_ns=%llu",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()), page_io_backend_name(io_backend_type()),
+      id(), page_num, BP_PAGE_SIZE, static_cast<unsigned long long>(duration_ns));
   LOG_TRACE("write_page: buffer_pool_id:%d, page_num:%d, lsn=%d, check_sum=%d", id(), page_num, page.lsn, page.check_sum);
   return RC::SUCCESS;
 }
@@ -724,19 +837,39 @@ RC DiskBufferPool::redo_deallocate_page(LSN lsn, PageNum page_num)
 RC DiskBufferPool::allocate_frame(PageNum page_num, Frame **buffer)
 {
   auto purger = [this](Frame *frame) {
+    const bool dirty = frame->dirty();
     if (!frame->dirty()) {
+      DiskBufferPool *victim_pool = nullptr;
+      if (frame->buffer_pool_id() == id()) {
+        victim_pool = this;
+      } else {
+        bp_manager_.get_buffer_pool(frame->buffer_pool_id(), victim_pool);
+      }
+      if (victim_pool != nullptr) {
+        victim_pool->stats_.record_eviction(false);
+      }
       return RC::SUCCESS;
     }
 
     RC rc = RC::SUCCESS;
     if (frame->buffer_pool_id() == id()) {
-      rc = this->flush_page_internal(*frame);
+      rc = this->flush_page_internal(*frame, FlushReason::EVICTION);
     } else {
-      rc = bp_manager_.flush_page(*frame);
+      rc = bp_manager_.flush_page(*frame, FlushReason::EVICTION);
     }
 
     if (rc != RC::SUCCESS) {
       LOG_ERROR("Failed to aclloc block due to failed to flush old block. rc=%s", strrc(rc));
+    } else {
+      DiskBufferPool *victim_pool = nullptr;
+      if (frame->buffer_pool_id() == id()) {
+        victim_pool = this;
+      } else {
+        bp_manager_.get_buffer_pool(frame->buffer_pool_id(), victim_pool);
+      }
+      if (victim_pool != nullptr) {
+        victim_pool->stats_.record_eviction(dirty);
+      }
     }
     return rc;
   };
@@ -752,7 +885,16 @@ RC DiskBufferPool::allocate_frame(PageNum page_num, Frame **buffer)
     LOG_TRACE("frames are all allocated, so we should purge some frames to get one free frame");
     const int purged = frame_manager_.purge_frames(1 /*count*/, purger);
     if (purged == 0) {
-      LOG_WARN("failed to allocate frame: all frames are pinned or cannot be flushed");
+      frame_manager_.stats().record_no_buffer_failure();
+      stats_.record_no_buffer_failure();
+      const BufferPoolSnapshot state = frame_manager_.snapshot();
+      LOG_TRACE("[BUFFER_POOL_TRACE] event=NO_BUFFER event_seq=%llu policy=%s io_backend=%s capacity=%zu used=%zu pinned_frames=%zu dirty_frames=%zu",
+          static_cast<unsigned long long>(next_buffer_pool_event_sequence()),
+          state.replacement_policy.c_str(), page_io_backend_name(io_backend_type()), state.capacity,
+          state.used_frames, state.pinned_frames, state.dirty_frames);
+      LOG_WARN("failed to allocate frame: all frames are pinned or cannot be flushed. capacity=%zu used=%zu pinned=%zu dirty=%zu",
+          state.capacity, state.used_frames, state.pinned_frames, state.dirty_frames);
+      log_pinned_frames("no-buffer", false);
       return RC::BUFFERPOOL_NOBUF;
     }
   }
@@ -781,23 +923,19 @@ RC DiskBufferPool::load_page(PageNum page_num, Frame *frame)
   }
 
   scoped_lock lock_guard(wr_lock_);
-  int64_t          offset = ((int64_t)page_num) * BP_PAGE_SIZE;
-  if (lseek(file_desc_, offset, SEEK_SET) == -1) {
-    LOG_ERROR("Failed to load page %s:%d, due to failed to lseek:%s.", file_name_.c_str(), page_num, strerror(errno));
-
-    return RC::IOERR_SEEK;
+  const auto read_start = std::chrono::steady_clock::now();
+  rc = io_backend_->read_page(file_desc_, file_name_.c_str(), page_num, page);
+  const uint64_t duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - read_start).count();
+  if (rc != RC::SUCCESS) {
+    return rc;
   }
 
-  int ret = readn(file_desc_, &page, BP_PAGE_SIZE);
-  if (ret != 0) {
-    LOG_ERROR("Failed to load page %s, file_desc:%d, page num:%d, due to failed to read data:%s, ret=%d, page count=%d",
-              file_name_.c_str(), file_desc_, page_num, strerror(errno), ret, file_header_->allocated_pages);
-    return RC::IOERR_READ;
-  }
-
-  frame_manager_.stats().record_disk_read();
-  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_READ buffer_pool_id=%d page_num=%d bytes=%d",
-      id(), page_num, BP_PAGE_SIZE);
+  frame_manager_.stats().record_disk_read(BP_PAGE_SIZE, duration_ns);
+  stats_.record_disk_read(BP_PAGE_SIZE, duration_ns);
+  LOG_TRACE("[BUFFER_POOL_TRACE] event=DISK_READ event_seq=%llu io_backend=%s buffer_pool_id=%d page_num=%d bytes=%d duration_ns=%llu",
+      static_cast<unsigned long long>(next_buffer_pool_event_sequence()), page_io_backend_name(io_backend_type()),
+      id(), page_num, BP_PAGE_SIZE, static_cast<unsigned long long>(duration_ns));
   frame->set_page_num(page_num);
 
   LOG_DEBUG("Load page %s:%d, file_desc:%d, frame=%s",
@@ -807,17 +945,57 @@ RC DiskBufferPool::load_page(PageNum page_num, Frame *frame)
 
 int DiskBufferPool::file_desc() const { return file_desc_; }
 
+BufferPoolSnapshot DiskBufferPool::snapshot() const
+{
+  BufferPoolSnapshot result = frame_manager_.snapshot(id());
+  result.buffer_pool_id = id();
+  result.file_name = file_name_;
+  result.io_backend = page_io_backend_name(io_backend_type());
+  result.stats = stats_.snapshot();
+  // 当前值由 Frame 快照计算，比仅在 DiskBufferPool 公共入口统计更准确。
+  result.stats.current_pinned_frames = result.pinned_frames;
+  result.stats.dirty_pages_current = result.dirty_frames;
+  return result;
+}
+
+void DiskBufferPool::log_pinned_frames(const char *context, bool warning) const
+{
+  const BufferPoolSnapshot state = snapshot();
+  if (state.pinned_frames == 0) {
+    return;
+  }
+
+  constexpr size_t MAX_DIAGNOSTIC_FRAMES = 8;
+  size_t emitted = 0;
+  for (const FrameSnapshot &frame : state.frames) {
+    if (frame.pin_count <= 0 || emitted >= MAX_DIAGNOSTIC_FRAMES) {
+      continue;
+    }
+    if (warning) {
+      LOG_WARN("buffer pool pinned frame diagnostic. context=%s frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d dirty=%d",
+          context, frame.frame_id.c_str(), frame.buffer_pool_id, frame.page_num, frame.pin_count, frame.dirty);
+    } else {
+      LOG_TRACE("[BUFFER_POOL_TRACE] event=PINNED_DIAGNOSTIC event_seq=%llu context=%s frame_id=%s buffer_pool_id=%d page_num=%d pin_count=%d dirty=%d",
+          static_cast<unsigned long long>(next_buffer_pool_event_sequence()), context, frame.frame_id.c_str(),
+          frame.buffer_pool_id, frame.page_num, frame.pin_count, frame.dirty);
+    }
+    ++emitted;
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
-BufferPoolManager::BufferPoolManager(int memory_size /* = 0 */, BufferPoolReplacementPolicy replacement_policy)
-    : frame_manager_("BufPool", replacement_policy)
+BufferPoolManager::BufferPoolManager(
+    int memory_size /* = 0 */, BufferPoolReplacementPolicy replacement_policy, PageIOBackendType io_backend_type)
+    : frame_manager_("BufPool", replacement_policy), io_backend_type_(io_backend_type)
 {
   if (memory_size <= 0) {
     memory_size = MEM_POOL_ITEM_NUM * DEFAULT_ITEM_NUM_PER_POOL * BP_PAGE_SIZE;
   }
   const int page_num = max(memory_size / BP_PAGE_SIZE, 1);
   frame_manager_.init(1, page_num);
-  LOG_INFO("buffer pool manager init with memory size %d, page num: %d, policy: %s",
-      memory_size, page_num, buffer_pool_replacement_policy_name(replacement_policy));
+  LOG_INFO("buffer pool manager init with memory size %d, page num: %d, policy: %s, io_backend: %s",
+      memory_size, page_num, buffer_pool_replacement_policy_name(replacement_policy),
+      page_io_backend_name(io_backend_type));
 }
 
 BufferPoolManager::~BufferPoolManager()
@@ -829,8 +1007,9 @@ BufferPoolManager::~BufferPoolManager()
     delete iter.second;
   }
 
-  LOG_INFO("[BUFFER_POOL_STATS] policy=%s,%s",
-      buffer_pool_replacement_policy_name(replacement_policy()), stats().to_string().c_str());
+  LOG_INFO("[BUFFER_POOL_STATS] policy=%s,io_backend=%s,%s",
+      buffer_pool_replacement_policy_name(replacement_policy()), page_io_backend_name(io_backend_type_),
+      stats().to_string().c_str());
 }
 
 RC BufferPoolManager::init(unique_ptr<DoubleWriteBuffer> dblwr_buffer)
@@ -868,17 +1047,16 @@ RC BufferPoolManager::create_file(const char *file_name)
 
   char *bitmap = file_header->bitmap;
   bitmap[0] |= 0x01;
-  if (lseek(fd, 0, SEEK_SET) == -1) {
-    LOG_ERROR("Failed to seek file %s to position 0, due to %s .", file_name, strerror(errno));
+  unique_ptr<PageIOBackend> io_backend = create_page_io_backend(io_backend_type_);
+  const auto write_start = std::chrono::steady_clock::now();
+  RC rc = io_backend->write_page(fd, file_name, BP_HEADER_PAGE, page);
+  const uint64_t duration_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - write_start).count();
+  if (rc != RC::SUCCESS) {
     close(fd);
-    return RC::IOERR_SEEK;
+    return rc;
   }
-
-  if (writen(fd, (char *)&page, BP_PAGE_SIZE) != 0) {
-    LOG_ERROR("Failed to write header to file %s, due to %s.", file_name, strerror(errno));
-    close(fd);
-    return RC::IOERR_WRITE;
-  }
+  frame_manager_.stats().record_disk_write(BP_PAGE_SIZE, duration_ns);
 
   close(fd);
   LOG_INFO("Successfully create %s.", file_name);
@@ -895,7 +1073,7 @@ RC BufferPoolManager::open_file(LogHandler &log_handler, const char *_file_name,
     return RC::BUFFERPOOL_OPEN;
   }
 
-  DiskBufferPool *bp = new DiskBufferPool(*this, frame_manager_, *dblwr_buffer_, log_handler);
+  DiskBufferPool *bp = new DiskBufferPool(*this, frame_manager_, *dblwr_buffer_, log_handler, io_backend_type_);
   RC              rc = bp->open_file(_file_name);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to open file name");
@@ -937,7 +1115,7 @@ RC BufferPoolManager::close_file(const char *_file_name)
   return RC::SUCCESS;
 }
 
-RC BufferPoolManager::flush_page(Frame &frame)
+RC BufferPoolManager::flush_page(Frame &frame, FlushReason reason)
 {
   int buffer_pool_id = frame.buffer_pool_id();
 
@@ -949,7 +1127,14 @@ RC BufferPoolManager::flush_page(Frame &frame)
   }
 
   DiskBufferPool *bp = iter->second;
-  return bp->flush_page(frame);
+  return bp->flush_page(frame, reason);
+}
+
+BufferPoolSnapshot BufferPoolManager::snapshot() const
+{
+  BufferPoolSnapshot result = frame_manager_.snapshot();
+  result.io_backend = page_io_backend_name(io_backend_type_);
+  return result;
 }
 
 RC BufferPoolManager::get_buffer_pool(int32_t id, DiskBufferPool *&bp)
