@@ -37,6 +37,7 @@ ArithmeticExpr *create_arithmetic_expression(ArithmeticExpr::Type type,
 {
   ArithmeticExpr *expr = new ArithmeticExpr(type, left, right);
   expr->set_name(token_name(sql_string, llocp));
+  expr->set_location(llocp->first_line, llocp->first_column);
   return expr;
 }
 
@@ -47,7 +48,41 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 {
   UnboundAggregateExpr *expr = new UnboundAggregateExpr(aggregate_name, child);
   expr->set_name(token_name(sql_string, llocp));
+  expr->set_location(llocp->first_line, llocp->first_column);
   return expr;
+}
+
+// 为表达式同时记录名字与位置（行列号）
+static Expression *set_expr_name_and_location(Expression *expr, const char *sql_string, YYLTYPE *llocp)
+{
+  if (expr != nullptr) {
+    expr->set_name(token_name(sql_string, llocp));
+    expr->set_location(llocp->first_line, llocp->first_column);
+  }
+  return expr;
+}
+
+// 将带引号的字符串常量还原为原始内容，并处理转义：'' -> '，\\ -> \，\x -> x
+char *unescape_quoted_string(char *quoted, int len)
+{
+  if (len < 2) {
+    return common::substr(quoted, 0, len);
+  }
+  char *out     = new char[len + 1];
+  int   o       = 0;
+  for (int i = 1; i < len - 1; i++) {
+    if (quoted[i] == '\\' && i + 1 < len - 1) {
+      out[o++] = quoted[i + 1];
+      i++;
+    } else if (quoted[i] == '\'' && i + 1 < len - 1 && quoted[i + 1] == '\'') {
+      out[o++] = '\'';
+      i++;
+    } else {
+      out[o++] = quoted[i];
+    }
+  }
+  out[o] = '\0';
+  return out;
 }
 
 %}
@@ -68,6 +103,7 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
         CREATE
         DROP
         GROUP
+        ORDER
         TABLE
         TABLES
         INDEX
@@ -175,9 +211,13 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
 %type <expression>          expression
+%type <expression>          boolean_expr
+%type <expression>          comparison_predicate
 %type <expression>          aggregate_expression
+%type <expression>          select_where
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
+%type <expression_list>     order_by
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -202,17 +242,22 @@ UnboundAggregateExpr *create_aggregate_expression(const char *aggregate_name,
 %type <sql_node>            help_stmt
 %type <sql_node>            exit_stmt
 %type <sql_node>            command_wrapper
-// commands should be a list but I use a single command instead
 %type <sql_node>            commands
 
 %left '+' '-'
 %left '*' '/'
 %right UMINUS
+/* 布尔逻辑优先级：NOT > 比较 > AND > OR */
+%precedence NOT
+%left LT GT LE GE EQ NE
+%left AND
+%left OR
 %%
 
-commands: command_wrapper opt_semicolon  //commands or sqls. parser starts here.
+commands: /* empty */                   { /* 允许空输入，便于多语句解析 */ }
+    | commands command_wrapper opt_semicolon
   {
-    unique_ptr<ParsedSqlNode> sql_node = unique_ptr<ParsedSqlNode>($1);
+    unique_ptr<ParsedSqlNode> sql_node = unique_ptr<ParsedSqlNode>($2);
     sql_result->add_sql_node(std::move(sql_node));
   }
   ;
@@ -483,7 +528,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list where group_by
+    SELECT expression_list FROM rel_list select_where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -497,13 +542,17 @@ select_stmt:        /*  select 语句的语法解析树*/
       }
 
       if ($5 != nullptr) {
-        $$->selection.conditions.swap(*$5);
-        delete $5;
+        $$->selection.where_expression.reset($5);
       }
 
       if ($6 != nullptr) {
         $$->selection.group_by.swap(*$6);
         delete $6;
+      }
+
+      if ($7 != nullptr) {
+        $$->selection.order_by.swap(*$7);
+        delete $7;
       }
     }
     ;
@@ -556,14 +605,12 @@ expression:
       $$ = new StarExpr();
     }
     | value {
-      $$ = new ValueExpr(*$1);
-      $$->set_name(token_name(sql_string, &@$));
+      $$ = set_expr_name_and_location(new ValueExpr(*$1), sql_string, &@$);
       delete $1;
     }
     | rel_attr {
       RelAttrSqlNode *node = $1;
-      $$ = new UnboundFieldExpr(node->relation_name, node->attribute_name);
-      $$->set_name(token_name(sql_string, &@$));
+      $$ = set_expr_name_and_location(new UnboundFieldExpr(node->relation_name, node->attribute_name), sql_string, &@$);
       delete $1;
     }
     | aggregate_expression {
@@ -617,6 +664,50 @@ where:
     }
     | WHERE condition_list {
       $$ = $2;  
+    }
+    ;
+
+/* SELECT 使用的 WHERE：直接构建可执行的布尔表达式（支持 AND/OR/NOT/括号/算术） */
+select_where:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | WHERE boolean_expr {
+      $$ = $2;
+      $$->set_name(token_name(sql_string, &@$));
+    }
+    ;
+
+boolean_expr:
+    boolean_expr OR boolean_expr {
+      vector<unique_ptr<Expression>> children;
+      children.emplace_back($1);
+      children.emplace_back($3);
+      $$ = set_expr_name_and_location(new ConjunctionExpr(ConjunctionExpr::Type::OR, children), sql_string, &@$);
+    }
+    | boolean_expr AND boolean_expr {
+      vector<unique_ptr<Expression>> children;
+      children.emplace_back($1);
+      children.emplace_back($3);
+      $$ = set_expr_name_and_location(new ConjunctionExpr(ConjunctionExpr::Type::AND, children), sql_string, &@$);
+    }
+    | NOT boolean_expr {
+      // NOT expr 表示为 (expr == FALSE)，expr 为布尔表达式，结果为 0/1
+      ValueExpr *const_false = new ValueExpr(Value(false));
+      $$ = set_expr_name_and_location(new ComparisonExpr(EQUAL_TO, unique_ptr<Expression>($2), unique_ptr<Expression>(const_false)), sql_string, &@$);
+    }
+    | LBRACE boolean_expr RBRACE {
+      $$ = set_expr_name_and_location($2, sql_string, &@$);
+    }
+    | comparison_predicate {
+      $$ = $1;
+    }
+    ;
+
+comparison_predicate:
+    expression comp_op expression {
+      $$ = set_expr_name_and_location(new ComparisonExpr($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3)), sql_string, &@$);
     }
     ;
 condition_list:
@@ -705,6 +796,16 @@ group_by:
     {
       // group by 的表达式范围与select查询值的表达式范围是不同的，比如group by不支持 *
       // 但是这里没有处理。
+      $$ = $3;
+    }
+    ;
+order_by:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | ORDER BY expression_list
+    {
       $$ = $3;
     }
     ;

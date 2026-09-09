@@ -67,6 +67,7 @@ ID               [A-Za-z_]+[A-Za-z0-9_]*
 DOT              \.
 QUOTE            [\'\"]
 %x STR
+%x COMMENT
 
 /* 规则匹配的优先级：*/
 /* 1. 匹配的规则长的优先 */
@@ -77,6 +78,11 @@ QUOTE            [\'\"]
 
 {WHITE_SPACE}                                        // ignore whitespace
 \n                                                   ;
+"--"[^\n]*                                           ;
+"/*"                                                 { BEGIN(COMMENT); }
+<COMMENT>"*/"                                        { BEGIN(INITIAL); }
+<COMMENT>[^*]+                                       ;
+<COMMENT>\*                                          ;
 
 {DIGIT}+                           yylval->number=atoi(yytext); RETURN_TOKEN(NUMBER);
 {DIGIT}+{DOT}{DIGIT}+              yylval->floats=(float)(atof(yytext)); RETURN_TOKEN(FLOAT);
@@ -118,6 +124,7 @@ INFILE                                  RETURN_TOKEN(INFILE);
 EXPLAIN                                 RETURN_TOKEN(EXPLAIN);
 GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
+ORDER                                   RETURN_TOKEN(ORDER);
 STORAGE                                 RETURN_TOKEN(STORAGE);
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);
@@ -131,6 +138,7 @@ ENCLOSED                                RETURN_TOKEN(ENCLOSED);
 ")"                                     RETURN_TOKEN(RBRACE);
 
 ","                                     RETURN_TOKEN(COMMA);
+"=="                                    RETURN_TOKEN(EQ);
 "="                                     RETURN_TOKEN(EQ);
 "<="                                    RETURN_TOKEN(LE);
 "<>"                                    RETURN_TOKEN(NE);

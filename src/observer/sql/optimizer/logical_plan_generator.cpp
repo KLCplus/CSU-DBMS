@@ -26,6 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "sql/operator/project_logical_operator.h"
 #include "sql/operator/table_get_logical_operator.h"
 #include "sql/operator/group_by_logical_operator.h"
+#include "sql/operator/sort_logical_operator.h"
 
 #include "sql/stmt/calc_stmt.h"
 #include "sql/stmt/delete_stmt.h"
@@ -88,16 +89,22 @@ RC LogicalPlanGenerator::create_plan(CalcStmt *calc_stmt, unique_ptr<LogicalOper
 
 RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<LogicalOperator> &logical_operator)
 {
+  RC rc = RC::SUCCESS;
   unique_ptr<LogicalOperator> *last_oper = nullptr;
 
   unique_ptr<LogicalOperator> table_oper(nullptr);
   last_oper = &table_oper;
   unique_ptr<LogicalOperator> predicate_oper;
 
-  RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
-  if (OB_FAIL(rc)) {
-    LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
-    return rc;
+  // WHERE 为布尔表达式时，直接构造谓词；否则走旧的 filter_units 路径
+  if (select_stmt->where_expression()) {
+    predicate_oper = make_unique<PredicateLogicalOperator>(std::move(select_stmt->where_expression()));
+  } else {
+    RC rc = create_plan(select_stmt->filter_stmt(), predicate_oper);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("failed to create predicate logical plan. rc=%s", strrc(rc));
+      return rc;
+    }
   }
 
   const vector<Table *> &tables = select_stmt->tables();
@@ -136,6 +143,20 @@ RC LogicalPlanGenerator::create_plan(SelectStmt *select_stmt, unique_ptr<Logical
     }
 
     last_oper = &group_by_oper;
+  }
+
+  // ORDER BY：在投影前插入排序算子
+  unique_ptr<LogicalOperator> sort_oper;
+  if (!select_stmt->order_by().empty()) {
+    sort_oper = make_unique<SortLogicalOperator>(std::move(select_stmt->order_by()));
+  }
+
+  if (sort_oper) {
+    if (*last_oper) {
+      sort_oper->add_child(std::move(*last_oper));
+    }
+
+    last_oper = &sort_oper;
   }
 
   unique_ptr<LogicalOperator> project_oper = make_unique<ProjectLogicalOperator>(std::move(select_stmt->query_expressions()));

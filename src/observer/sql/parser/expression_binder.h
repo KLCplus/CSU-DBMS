@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include "common/lang/string.h"
 #include "sql/expr/expression.h"
 
 class BinderContext
@@ -63,3 +64,13 @@ private:
 private:
   BinderContext &context_;
 };
+
+/**
+ * @brief 语义错误消息（含行列定位）的线程本地跨层通道
+ * @details 语义错误在表达式绑定阶段被检测到，但此时返回的只有 RC 码。为了让上层
+ * （如 resolve_stage）能够把带行列位置的结构化错误消息透出给用户，这里用一个
+ * 线程独立的槽位来传递消息。每次语句处理开始前需调用 reset_binder_error_message()。
+ */
+void reset_binder_error_message();
+void set_binder_error_message(const std::string &msg);
+const std::string &get_binder_error_message();

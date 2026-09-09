@@ -14,6 +14,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/stmt/insert_stmt.h"
 #include "common/log/log.h"
+#include "common/type/attr_type.h"
 #include "storage/db/db.h"
 #include "storage/table/table.h"
 
@@ -45,6 +46,23 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
   if (field_num != value_num) {
     LOG_WARN("schema mismatch. value num=%d, field num in schema=%d", value_num, field_num);
     return RC::SCHEMA_FIELD_MISSING;
+  }
+
+  // 逐列校验值类型是否与字段类型一致（允许 INT/FLOAT 数值类型间隐式转换）
+  for (int i = 0; i < value_num; i++) {
+    const FieldMeta *field_meta = table_meta.field(table_meta.sys_field_num() + i);
+    AttrType         field_type = field_meta->type();
+    AttrType         value_type = values[i].attr_type();
+    if (value_type == field_type) {
+      continue;
+    }
+    bool both_numeric = is_numerical_type(value_type) && is_numerical_type(field_type);
+    if (both_numeric) {
+      continue;
+    }
+    LOG_WARN("field %s expects type %s but value[%d] is %s",
+        field_meta->name(), attr_type_to_string(field_type), i, attr_type_to_string(value_type));
+    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
   }
 
   // everything alright
