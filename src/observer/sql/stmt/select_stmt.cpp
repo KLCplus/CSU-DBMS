@@ -82,6 +82,15 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
+  vector<unique_ptr<Expression>> order_by_expressions;
+  for (unique_ptr<Expression> &expression : select_sql.order_by) {
+    RC rc = expression_binder.bind_expression(expression, order_by_expressions);
+    if (OB_FAIL(rc)) {
+      LOG_INFO("bind order by expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+  }
+
   Table *default_table = nullptr;
   if (tables.size() == 1) {
     default_table = tables[0];
@@ -100,13 +109,31 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     return rc;
   }
 
+  // 绑定 WHERE 布尔表达式（若有），支持 AND/OR/NOT/括号/算术
+  unique_ptr<Expression> where_expression;
+  if (select_sql.where_expression != nullptr) {
+    vector<unique_ptr<Expression>> bound_where;
+    rc = expression_binder.bind_expression(select_sql.where_expression, bound_where);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("bind where expression failed. rc=%s", strrc(rc));
+      return rc;
+    }
+    if (bound_where.size() != 1) {
+      LOG_WARN("invalid where expression result count. count=%d", static_cast<int>(bound_where.size()));
+      return rc;
+    }
+    where_expression = std::move(bound_where[0]);
+  }
+
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
+  select_stmt->where_expression_ = std::move(where_expression);
   select_stmt->group_by_.swap(group_by_expressions);
+  select_stmt->order_by_.swap(order_by_expressions);
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

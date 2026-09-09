@@ -15,10 +15,20 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/lang/string.h"
 #include "common/lang/ranges.h"
+#include <cstdio>
 #include "sql/parser/expression_binder.h"
 #include "sql/expr/expression_iterator.h"
 
 using namespace common;
+
+namespace
+{
+thread_local std::string g_binder_error_message;
+}
+
+void reset_binder_error_message() { g_binder_error_message.clear(); }
+void set_binder_error_message(const std::string &msg) { g_binder_error_message = msg; }
+const std::string &get_binder_error_message() { return g_binder_error_message; }
 
 Table *BinderContext::find_table(const char *table_name) const
 {
@@ -114,6 +124,10 @@ RC ExpressionBinder::bind_star_expression(
     Table *table = context_.find_table(table_name);
     if (nullptr == table) {
       LOG_INFO("no such table in from list: %s", table_name);
+      char msg[256];
+      snprintf(msg, sizeof(msg), "SemanticError at line %d, column %d: no such table '%s'",
+          star_expr->line(), star_expr->column(), table_name);
+      set_binder_error_message(msg);
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
@@ -146,6 +160,10 @@ RC ExpressionBinder::bind_unbound_field_expression(
   if (is_blank(table_name)) {
     if (context_.query_tables().size() != 1) {
       LOG_INFO("cannot determine table for field: %s", field_name);
+      char msg[256];
+      snprintf(msg, sizeof(msg), "SemanticError at line %d, column %d: cannot determine table for field '%s'",
+          unbound_field_expr->line(), unbound_field_expr->column(), field_name);
+      set_binder_error_message(msg);
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
 
@@ -154,6 +172,10 @@ RC ExpressionBinder::bind_unbound_field_expression(
     table = context_.find_table(table_name);
     if (nullptr == table) {
       LOG_INFO("no such table in from list: %s", table_name);
+      char msg[256];
+      snprintf(msg, sizeof(msg), "SemanticError at line %d, column %d: no such table '%s'",
+          unbound_field_expr->line(), unbound_field_expr->column(), table_name);
+      set_binder_error_message(msg);
       return RC::SCHEMA_TABLE_NOT_EXIST;
     }
   }
@@ -164,6 +186,10 @@ RC ExpressionBinder::bind_unbound_field_expression(
     const FieldMeta *field_meta = table->table_meta().field(field_name);
     if (nullptr == field_meta) {
       LOG_INFO("no such field in table: %s.%s", table_name, field_name);
+      char msg[256];
+      snprintf(msg, sizeof(msg), "SemanticError at line %d, column %d: no such field '%s.%s'",
+          unbound_field_expr->line(), unbound_field_expr->column(), table_name, field_name);
+      set_binder_error_message(msg);
       return RC::SCHEMA_FIELD_MISSING;
     }
 
