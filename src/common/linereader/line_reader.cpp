@@ -32,13 +32,15 @@ void MiniobLineReader::init(const std::string &history_file)
   reader_.history_load(history_file_);
 }
 
-std::string MiniobLineReader::my_readline(const std::string &prompt)
+std::string MiniobLineReader::my_readline(const std::string &prompt, bool add_history)
 {
   const char *cinput = nullptr;
   cinput             = reader_.input(prompt);
   if (cinput == nullptr) {
+    eof_ = true;
     return "";
   }
+  eof_ = false;
 
   std::string line = cinput;
   cinput           = nullptr;
@@ -55,12 +57,16 @@ std::string MiniobLineReader::my_readline(const std::string &prompt)
     }
   }
 
-  if (is_valid_input) {
-    reader_.history_add(line);
-    check_and_save_history();
-  }
+  if (is_valid_input && add_history) this->add_history(line);
 
   return line;
+}
+
+void MiniobLineReader::add_history(const std::string &line)
+{
+  if (line.empty()) return;
+  reader_.history_add(line);
+  check_and_save_history();
 }
 
 bool MiniobLineReader::is_exit_command(const std::string &cmd)

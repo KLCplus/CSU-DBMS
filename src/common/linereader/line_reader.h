@@ -48,7 +48,9 @@ public:
    * @param prompt The prompt to display
    * @return input string
    */
-  std::string my_readline(const std::string &prompt);
+  std::string my_readline(const std::string &prompt, bool add_history = true);
+  void add_history(const std::string &line);
+  bool eof() const { return eof_; }
 
   /**
    * @brief Check if the command is an exit command
@@ -69,6 +71,7 @@ private:
   std::string    history_file_;
   time_t         previous_history_save_time_;
   int            history_save_interval_;
+  bool           eof_ = false;
 };
 }  // namespace common
 

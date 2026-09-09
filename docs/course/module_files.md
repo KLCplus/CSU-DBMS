@@ -1,4 +1,4 @@
-# CSU-DBMS 三门课程源码文件清单
+# CSUDB 2026 三门课程源码文件清单
 
 > 本文按当前仓库真实文件整理编译器、数据库、操作系统/存储及其集成边界。清单基于 2026-09-08 的 `main` 分支；只列课程主线、运行基础设施、测试和明确保留的高级模块，不把第三方依赖 `deps/` 纳入课程源码。
 
@@ -19,7 +19,7 @@
 | `src/observer/sql/optimizer/logical_plan_generator.cpp` | 编译器 IR 生成与数据库逻辑算子的交界 |
 | `src/observer/sql/operator/table_scan_physical_operator.cpp` | 数据库执行器向存储层发起扫描 |
 | `src/observer/storage/record/record_manager.cpp` | 数据库的 Record/RID 映射到 OS 页式存储 |
-| `src/observer/storage/buffer/disk_buffer_pool.cpp` | 数据库 Page/Frame 映射到文件系统 `read/write/lseek` |
+| `src/observer/storage/buffer/disk_buffer_pool.cpp` | 数据库 Page/Frame 通过 ReplacementPolicy 与 PageIOBackend 映射到 OS 文件 I/O |
 | `src/observer/storage/db/db.cpp` | 数据库生命周期组织 Buffer Pool、Log、Transaction 和 Recovery |
 
 当前完整主链：
@@ -367,8 +367,11 @@ lsm_mvcc_trx.h / lsm_mvcc_trx.cpp
 | --- | --- | --- |
 | `page.h` | 固定 8 KiB Page 的二进制布局、LSN 和 checksum | P0 |
 | `frame.h`, `frame.cpp` | 内存 Frame、Page、dirty、pin、latch、访问时间 | P0 |
-| `disk_buffer_pool.h`, `disk_buffer_pool.cpp` | 页文件、页分配/释放、缓存、LRU/FIFO、I/O | P0 |
-| `buffer_pool_stats.h`, `buffer_pool_stats.cpp` | hit/miss、磁盘读写、淘汰、flush 统计 | P0 |
+| `disk_buffer_pool.h`, `disk_buffer_pool.cpp` | 页文件、页分配/释放、Frame 管理、策略与 I/O 委托、Flush | P0 |
+| `replacement/replacement_policy.h`, `.cpp` | 可插拔 LRU/FIFO/CLOCK 与 victim 选择 | P0 |
+| `page_io_backend.h`, `page_io_backend.cpp` | legacy/positional Page I/O 后端 | P0 |
+| `buffer_pool_stats.h`, `buffer_pool_stats.cpp` | hit/miss、pin、I/O/延迟、淘汰、dirty、分类 flush | P0 |
+| `buffer_pool_diagnostics.h`, `.cpp` | Snapshot DTO、Dirty Flush 结果、Trace event sequence | P0 |
 | `buffer_pool_log.h`, `buffer_pool_log.cpp` | Buffer Pool WAL 与回放 | P2 |
 | `double_write_buffer.h`, `double_write_buffer.cpp` | Double Write 防止 torn page | P2 |
 
@@ -412,14 +415,14 @@ src/observer/storage/table/heap_table_engine.cpp
 
 | 文件组 | 责任 | 优先级 |
 | --- | --- | --- |
-| `src/common/io/io.h`, `src/common/io/io.cpp` | `readn/writen` 等可靠文件描述符 I/O | P0 |
+| `src/common/io/io.h`, `src/common/io/io.cpp` | `readn/writen/preadn/pwriten` 可靠文件描述符 I/O | P0 |
 | `src/observer/storage/persist/persist.h`, `src/observer/storage/persist/persist.cpp` | 通用持久化文件辅助 | P2 |
 | `src/observer/storage/common/meta_util.h`, `src/observer/storage/common/meta_util.cpp` | 存储文件路径和命名 | P1 |
 | `src/common/os/path.h`, `src/common/os/path.cpp` | 路径处理 | P1 |
 | `src/common/os/os.h`, `src/common/os/os.cpp` | OS 公共功能 | P2 |
 | `src/common/math/crc.h`, `src/common/math/crc.cpp` | Page checksum | P1 |
 
-真正的页级 `lseek + read/write` 主要在 `disk_buffer_pool.cpp` 与 `double_write_buffer.cpp`，后续 OS I/O Trace 应挂在这里，不能绕开 Buffer Pool 从 Executor 直接读文件。
+目标分页文件的页级 I/O 由 `disk_buffer_pool.cpp` 委托给 `page_io_backend.cpp`；legacy 使用 `lseek + read/write`，positional 使用 `pread/pwrite`。Double Write Buffer 和 WAL 有独立文件路径与统计边界。不能绕开 Buffer Pool 从 Executor 直接读文件。
 
 ### 4.4 WAL、Redo 与 Recovery（Advanced / Reserved）
 
@@ -477,11 +480,13 @@ src/common/mm/debug_new.h
 
 ## 5. CLI、网络和未来第三方接口文件
 
-### 5.1 CSU-DBMS 外观与启动
+### 5.1 CSUDB 2026 外观与启动
 
 ```text
 csudb
 etc/csudb.ini
+etc/csudb-client.toml
+src/common/version.h
 src/observer/main.cpp
 src/observer/common/init.h
 src/observer/common/init.cpp
@@ -497,6 +502,7 @@ src/observer/mainpage.md
 | 文件组 | 责任 | 优先级 |
 | --- | --- | --- |
 | `communicator.h`, `communicator.cpp` | CLI/Plain/MySQL 请求与结果抽象、工厂 | P1 |
+| `native_communicator.h`, `native_communicator.cpp` | CSUDB 认证 native protocol 与 QueryResult JSON | P0 |
 | `cli_communicator.h`, `cli_communicator.cpp` | 本地 stdin/stdout Shell | P1 |
 | `plain_communicator.h`, `plain_communicator.cpp` | 简单 `\0` 结尾 TCP 文本协议 | P1 |
 | `mysql_communicator.h`, `mysql_communicator.cpp` | MySQL wire protocol | P2 |
@@ -514,6 +520,18 @@ src/observer/mainpage.md
 ```text
 src/obclient/CMakeLists.txt
 src/obclient/client.cpp
+```
+
+产品服务与认证边界：
+
+```text
+src/observer/service/database_service.h / database_service.cpp
+src/observer/service/query_result.h / query_result.cpp
+src/observer/auth/system_catalog.h / system_catalog.cpp
+src/observer/session/session.h / session.cpp
+docs/product/COMMANDS.md
+docs/product/COMMAND_AUDIT.md
+docs/product/ARCHITECTURE.md
 ```
 
 行编辑与历史：

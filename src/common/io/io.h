@@ -77,4 +77,16 @@ int writen(int fd, const void *buf, int size);
  */
 int readn(int fd, void *buf, int size);
 
+/**
+ * @brief 从指定偏移可靠地读取指定长度的数据，不改变文件描述符的当前位置
+ * @return 0 表示成功，-1 表示提前遇到 EOF，其它值表示 errno
+ */
+int preadn(int fd, void *buf, int size, int64_t offset);
+
+/**
+ * @brief 向指定偏移可靠地写入指定长度的数据，不改变文件描述符的当前位置
+ * @return 0 表示成功，其它值表示 errno
+ */
+int pwriten(int fd, const void *buf, int size, int64_t offset);
+
 }  // namespace common

@@ -1,16 +1,4 @@
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
 
-//
-// Created by lianyu on 2022/10/29.
-//
 
 #pragma once
 
@@ -24,6 +12,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/types.h"
 #include "storage/buffer/page.h"
+
+class BufferPoolStats;
 
 /**
  * @brief 页帧标识符
@@ -120,19 +110,20 @@ public:
    * 最近最少使用，采用的依据就是访问时间。所以每次访问某个页面时，我们都要刷新一下访问时间。
    */
   void access();
+  uint64_t last_access_ns() const { return acc_time_; }
 
   /**
    * @brief 标记指定页面为“脏”页。
    * @details 如果修改了页面的内容，则应调用此函数，
    * 以便该页面被淘汰出缓冲区时系统将新的页面数据写入磁盘文件
    */
-  void mark_dirty() { dirty_ = true; }
+  void mark_dirty();
 
   /**
    * @brief 重置“脏”标记
    * @details 如果页面已经被写入磁盘文件，则应调用此函数。
    */
-  void clear_dirty() { dirty_ = false; }
+  void clear_dirty();
   bool dirty() const { return dirty_; }
 
   char *data() { return page_.data; }
@@ -152,6 +143,8 @@ public:
    */
   int unpin();
   int pin_count() const { return pin_count_.load(); }
+
+  void set_stats(BufferPoolStats *stats) { stats_ = stats; }
 
   void write_latch();
   void write_latch(intptr_t xid);
@@ -176,6 +169,7 @@ private:
   unsigned long acc_time_ = 0;
   FrameId       frame_id_;
   Page          page_;
+  BufferPoolStats *stats_ = nullptr;
 
   /// 在非并发编译时，加锁解锁动作将什么都不做
   common::RecursiveSharedMutex lock_;
