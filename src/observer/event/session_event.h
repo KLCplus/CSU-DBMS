@@ -21,6 +21,17 @@ See the Mulan PSL v2 for more details. */
 class Session;
 class Communicator;
 
+enum class ClientRequestType
+{
+  PROTOCOL_ERROR,
+  QUERY,
+  LOGIN,
+  LOGOUT,
+  PING,
+  SERVER_INFO,
+  BUFFER_SNAPSHOT,
+};
+
 /**
  * @brief 表示一个SQL请求
  *
@@ -40,9 +51,29 @@ public:
   SqlResult    *sql_result() { return &sql_result_; }
   SqlDebug     &sql_debug() { return sql_debug_; }
 
+  void set_request_type(ClientRequestType type) { request_type_ = type; }
+  ClientRequestType request_type() const { return request_type_; }
+  void set_username(const string &value) { username_ = value; }
+  const string &username() const { return username_; }
+  void set_password(const string &value) { password_ = value; }
+  const string &password() const { return password_; }
+  void clear_password() { password_.assign(password_.size(), '\0'); password_.clear(); }
+  void set_database(const string &value) { database_ = value; }
+  const string &database() const { return database_; }
+  void set_snapshot_limit(size_t value) { snapshot_limit_ = value; }
+  size_t snapshot_limit() const { return snapshot_limit_; }
+  void set_protocol_error(const string &value) { protocol_error_ = value; }
+  const string &protocol_error() const { return protocol_error_; }
+
 private:
   Communicator *communicator_ = nullptr;  ///< 与客户端通讯的对象
   SqlResult     sql_result_;              ///< SQL执行结果
   SqlDebug      sql_debug_;               ///< SQL调试信息
   string        query_;                   ///< SQL语句
+  ClientRequestType request_type_ = ClientRequestType::QUERY;
+  string        username_;
+  string        password_;
+  string        database_;
+  size_t        snapshot_limit_ = 20;
+  string        protocol_error_;
 };

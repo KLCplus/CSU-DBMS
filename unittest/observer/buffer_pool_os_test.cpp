@@ -31,7 +31,7 @@ PageNum run_replacement_sequence(BufferPoolReplacementPolicy policy)
     frame->unpin();
   }
 
-  // LRU 会把页面 1 移到队首；FIFO 保持页面首次进入缓存的顺序。
+  // LRU 会刷新页面 1 的新近性；FIFO 保持首次进入顺序；CLOCK 设置 reference bit。
   Frame *page_one = frame_manager.get(1, 1);
   EXPECT_NE(nullptr, page_one);
   page_one->unpin();
@@ -54,6 +54,7 @@ TEST(BufferPoolOS, lru_and_fifo_choose_different_victims)
 {
   EXPECT_EQ(2, run_replacement_sequence(BufferPoolReplacementPolicy::LRU));
   EXPECT_EQ(1, run_replacement_sequence(BufferPoolReplacementPolicy::FIFO));
+  EXPECT_EQ(1, run_replacement_sequence(BufferPoolReplacementPolicy::CLOCK));
 }
 
 TEST(BufferPoolOS, parses_replacement_policy)
@@ -63,7 +64,18 @@ TEST(BufferPoolOS, parses_replacement_policy)
   EXPECT_EQ(BufferPoolReplacementPolicy::FIFO, policy);
   EXPECT_TRUE(parse_buffer_pool_replacement_policy("lru", policy));
   EXPECT_EQ(BufferPoolReplacementPolicy::LRU, policy);
-  EXPECT_FALSE(parse_buffer_pool_replacement_policy("clock", policy));
+  EXPECT_TRUE(parse_buffer_pool_replacement_policy("ClOcK", policy));
+  EXPECT_EQ(BufferPoolReplacementPolicy::CLOCK, policy);
+}
+
+TEST(BufferPoolOS, parses_page_io_backend)
+{
+  PageIOBackendType backend = PageIOBackendType::LEGACY;
+  EXPECT_TRUE(parse_page_io_backend("POSITIONAL", backend));
+  EXPECT_EQ(PageIOBackendType::POSITIONAL, backend);
+  EXPECT_TRUE(parse_page_io_backend("legacy", backend));
+  EXPECT_EQ(PageIOBackendType::LEGACY, backend);
+  EXPECT_FALSE(parse_page_io_backend("unknown", backend));
 }
 
 TEST(BufferPoolOS, records_dirty_eviction)
@@ -122,6 +134,20 @@ TEST(BufferPoolOS, records_hit_miss_and_disk_read)
   EXPECT_EQ(1, stats.disk_reads);
   EXPECT_DOUBLE_EQ(0.5, stats.hit_rate());
 
+  const BufferPoolSnapshot state = buffer_pool->snapshot();
+  EXPECT_EQ(4, state.capacity);
+  EXPECT_EQ("LRU", state.replacement_policy);
+  EXPECT_EQ("legacy", state.io_backend);
+  EXPECT_EQ(filename.string(), state.file_name);
+
+  ASSERT_EQ(RC::SUCCESS, buffer_pool->get_this_page(page_num, &frame));
+  frame->mark_dirty();
+  ASSERT_EQ(RC::SUCCESS, buffer_pool->unpin_page(frame));
+  DirtyPageFlushResult flush_result;
+  EXPECT_EQ(RC::SUCCESS, buffer_pool->flush_dirty_pages(1, flush_result));
+  EXPECT_EQ(1, flush_result.flushed_count);
+  EXPECT_EQ(0, flush_result.failed_count);
+
   EXPECT_EQ(RC::SUCCESS, bpm.close_file(filename.c_str()));
   filesystem::remove_all(directory);
 }
@@ -145,6 +171,10 @@ TEST(BufferPoolOS, returns_no_buffer_when_every_frame_is_pinned)
   Frame *frame = nullptr;
   EXPECT_EQ(RC::BUFFERPOOL_NOBUF, buffer_pool->allocate_page(&frame));
   EXPECT_EQ(nullptr, frame);
+  EXPECT_EQ(1, bpm.stats().no_buffer_failures);
+  const BufferPoolSnapshot state = buffer_pool->snapshot();
+  EXPECT_EQ(1, state.capacity);
+  EXPECT_EQ(1, state.pinned_frames);
 
   EXPECT_EQ(RC::SUCCESS, bpm.close_file(filename.c_str()));
   filesystem::remove_all(directory);

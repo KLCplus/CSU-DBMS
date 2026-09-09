@@ -41,6 +41,14 @@ public:
 
   void set_conf(const string &conf) { ProcessParam::conf = conf; }
 
+  void set_conf_explicit(const string &value)
+  {
+    conf = value;
+    conf_specified_ = true;
+  }
+
+  bool conf_specified() const { return conf_specified_; }
+
   const string &get_process_name() const { return process_name_; }
 
   void set_process_name(const string &processName) { ProcessParam::process_name_ = processName; }
@@ -100,18 +108,44 @@ public:
   {
     if (policy) {
       buffer_pool_replacement_policy_ = policy;
+      buffer_pool_replacement_policy_specified_ = true;
     }
   }
 
   const string &buffer_pool_replacement_policy() const { return buffer_pool_replacement_policy_; }
+  bool buffer_pool_replacement_policy_specified() const { return buffer_pool_replacement_policy_specified_; }
+
+  void set_page_io_backend(const char *backend)
+  {
+    if (backend) {
+      page_io_backend_ = backend;
+      page_io_backend_specified_ = true;
+    }
+  }
+
+  const string &page_io_backend() const { return page_io_backend_; }
+  bool page_io_backend_specified() const { return page_io_backend_specified_; }
 
   void          set_durability_mode(const char *mode) { durability_mode_ = mode; }
   const string &durability_mode() const { return durability_mode_; }
+
+  void set_listen_host(const char *host) { if (host) listen_host_ = host; }
+  const string &listen_host() const { return listen_host_; }
+
+  void set_data_dir(const char *path) { if (path) data_dir_ = path; }
+  const string &data_dir() const { return data_dir_; }
+
+  void set_log_dir(const char *path) { if (path) log_dir_ = path; }
+  const string &log_dir() const { return log_dir_; }
+
+  void set_initialize(bool value) { initialize_ = value; }
+  bool initialize() const { return initialize_; }
 
 private:
   string         std_out_;           // The output file
   string         std_err_;           // The err output file
   string         conf;               // The configuration file
+  bool           conf_specified_ = false;
   string         process_name_;      // The process name
   bool           demon = false;      // whether demon or not
   vector<string> args;               // arguments
@@ -123,7 +157,14 @@ private:
   string         thread_handling_name_;
   int            buffer_pool_memory_size_ = -1;
   string         buffer_pool_replacement_policy_ = "lru";
+  bool           buffer_pool_replacement_policy_specified_ = false;
+  string         page_io_backend_ = "legacy";
+  bool           page_io_backend_specified_ = false;
   string         durability_mode_;
+  string         listen_host_ = "127.0.0.1";
+  string         data_dir_ = "csudb_data";
+  string         log_dir_;
+  bool           initialize_ = false;
 };
 
 ProcessParam *&the_process_param();

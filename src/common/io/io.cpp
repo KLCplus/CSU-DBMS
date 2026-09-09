@@ -386,4 +386,50 @@ int readn(int fd, void *buf, int size)
   }
   return 0;
 }
+
+int preadn(int fd, void *buf, int size, int64_t offset)
+{
+  char *tmp = static_cast<char *>(buf);
+  while (size > 0) {
+    const ssize_t ret = ::pread(fd, tmp, size, offset);
+    if (ret > 0) {
+      tmp += ret;
+      size -= static_cast<int>(ret);
+      offset += ret;
+      continue;
+    }
+    if (ret == 0) {
+      return -1;
+    }
+
+    const int err = errno;
+    if (err != EAGAIN && err != EINTR) {
+      return err;
+    }
+  }
+  return 0;
+}
+
+int pwriten(int fd, const void *buf, int size, int64_t offset)
+{
+  const char *tmp = static_cast<const char *>(buf);
+  while (size > 0) {
+    const ssize_t ret = ::pwrite(fd, tmp, size, offset);
+    if (ret > 0) {
+      tmp += ret;
+      size -= static_cast<int>(ret);
+      offset += ret;
+      continue;
+    }
+    if (ret == 0) {
+      return EIO;
+    }
+
+    const int err = errno;
+    if (err != EAGAIN && err != EINTR) {
+      return err;
+    }
+  }
+  return 0;
+}
 }  // namespace common

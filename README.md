@@ -1,8 +1,25 @@
-# CSU-DBMS
+# CSUDB 2026
 
-CSU-DBMS v0.1 是面向“编译原理 + 数据库系统 + 操作系统”融合课程开发的教学数据库。当前版本提供独立的 `csudb` 交互命令、完整 SQL 执行链和可继续扩展的页式存储基座。
+CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优化与执行引擎、页式存储、Buffer Pool 以及事务/恢复基座。它同时是“编译原理 + 数据库系统 + 操作系统”融合课程的可运行工程。
 
-产品界面、命令入口、提示符、配置和运行目录均使用 CSU-DBMS 品牌；项目保留依法必须存在的上游版权与开源许可声明，二者不是产品宣传。
+产品命令统一为客户端 `csudb` 和服务端 `csudbd`。外部接入统一经过 `DatabaseService → Session/Auth → SQLTaskHandler → SQL Engine`，不会复制第二套 Parser 或 Executor。
+
+快速启动：
+
+```bash
+./build.sh debug --make -j4
+env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
+  ./build_debug/bin/csudbd --initialize --data-dir /tmp/csudb-data
+./build_debug/bin/csudbd --data-dir /tmp/csudb-data
+```
+
+另一个终端连接：
+
+```bash
+./build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
+```
+
+第一次使用请直接阅读 `docs/product/USER_GUIDE.md`。客户端完整命令见 `docs/product/COMMANDS.md`，现有/新增能力审计见 `docs/product/COMMAND_AUDIT.md`。
 
 > Baseline 原则：稳定性 > 可读性 > 精简程度。本次没有重写 Parser、Executor、Storage、Buffer Pool、B+Tree、Transaction 或日志实现。
 
@@ -26,7 +43,7 @@ SQL
   -> Disk / File
 ```
 
-SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本在稳定基座上提供 LRU/FIFO 缓存实验、Buffer Pool 统计和 Page Trace；不实现 GUI、编译过程可视化、新 MVCC 或新 WAL。
+SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本在稳定基座上提供 LRU/FIFO/CLOCK、legacy/positional Page I/O、Buffer Pool 快照与统计、Page Lifecycle Trace 和安全脏页刷新；不实现 GUI、后台 cleaner、新 MVCC 或新 WAL。
 
 ## 2. 当前基座保留的功能
 
@@ -38,7 +55,8 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 - Logical Plan、规则重写、Physical Plan。
 - Pull-based Physical Operator 与 `SqlResult` 驱动的执行。
 - Heap Table、Record/RID、Page/Frame、Buffer Pool 与磁盘文件。
-- 可配置的 LRU/FIFO 页面替换、缓存命中/I/O 统计和结构化 Page Trace。
+- 可插拔 LRU/FIFO/CLOCK 页面替换，以及 legacy/positional Page I/O 后端。
+- Global/Per-file Buffer Pool 统计、只读 Frame Snapshot、结构化 Page Trace 和安全批量脏页刷新。
 - 基本 SQL：`CREATE TABLE`、`INSERT`、`SELECT`、`WHERE`、`DELETE`。
 
 ### Advanced / Reserved
@@ -211,9 +229,10 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 | --- | --- | --- | --- |
 | Page | `storage/buffer/page.h`：`Page` | 8 KiB 页（LSN、checksum、data） | Page dump/Trace |
 | Frame | `storage/buffer/frame.h/.cpp`：`Frame` | Page + page id + dirty + pin + latch | Pin/dirty 可视化 |
-| Buffer Pool | `storage/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | LRU/FIFO、命中统计、页访问事件 |
-| Buffer Stats | `storage/buffer/buffer_pool_stats.h/.cpp` | Buffer 事件 → 统计快照 | 实验报告与策略对比 |
-| Disk I/O | `disk_buffer_pool.cpp`：`load_page`、`write_page` | `lseek + read/write` 与 Page | OS I/O Trace；后续可比较 `pread/pwrite` |
+| Buffer Pool | `storage/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | 生命周期与安全批量 Flush |
+| Replacement | `storage/buffer/replacement/replacement_policy.*` | Frame 生命周期事件 → victim | LRU/FIFO/CLOCK；可扩展 LRU-K/2Q |
+| Buffer Diagnostics | `buffer_pool_stats.*`、`buffer_pool_diagnostics.*` | Buffer 事件 → Stats/Snapshot DTO | CLI/GUI/实验工具只读消费 |
+| Disk I/O | `page_io_backend.*`、`src/common/io/io.*` | Page + offset ↔ 目标分页文件 | legacy `lseek/read/write`；positional `pread/pwrite` |
 | Record/RID | `storage/record/record.h`、`record_manager.h/.cpp` | 字节记录/RID ↔ record page slot | Record/Page 布局展示 |
 | Record Scan | `heap_record_scanner.cpp` | RecordPage iterator → Record 流 | SeqScan Trace |
 | Table | `storage/table/table.cpp`、`heap_table_engine.cpp` | Value → Record；扫描/写入/索引维护 | 表级统计与访问 Trace |
@@ -290,39 +309,54 @@ sudo apt install -y build-essential cmake flex bison gdb git
 ./build.sh debug --make -j4
 ```
 
-产物位于 `build_debug/bin/csudb`、`build_debug/bin/csudb-client`，并保留兼容目标 `observer` 和 `obclient`。`build` 是脚本创建的指向 `build_debug` 的符号链接。首次构建必须初始化 submodule 和第三方库。若 CMake 报找不到 FLEX/BISON，应先安装环境依赖，不要修改 Parser 生成流程。
+产品产物位于 `build_debug/bin/csudb`（客户端）和 `build_debug/bin/csudbd`（服务端）；`observer`、`obclient` 和 `csudb-client` 仅作为源码兼容目标继续构建，不进入正式安装。`build` 是脚本创建的指向 `build_debug` 的符号链接。首次构建必须初始化 submodule 和第三方库。
 
 ## 10. 启动
 
-从仓库根目录直接进入交互式 SQL Shell：
+首次创建数据目录（示例密码仅用于本地实验）：
 
 ```bash
-./csudb
+env CSUDB_INITIAL_ROOT_PASSWORD='ChangeMe2026!' \
+  build_debug/bin/csudbd --initialize \
+  --config etc/csudb.ini \
+  --data-dir /tmp/csudb-data
 ```
 
-进入后会看到 CSU-DBMS 欢迎界面和 `csudb >` 提示符。输入 `help;` 查看示例，输入 `exit`、`bye` 或 `\q` 退出。默认数据保存在当前工作目录的 `csudb_data/db/sys`，命令历史保存在 `.csudb_history`。
-
-查看参数与版本：
+启动服务端：
 
 ```bash
-./csudb --help
-./csudb --version
+build_debug/bin/csudbd \
+  --config etc/csudb.ini \
+  --data-dir /tmp/csudb-data \
+  --host 127.0.0.1 \
+  --port 6789
 ```
 
-启动 plain 协议网络服务及客户端：
+连接客户端：
 
 ```bash
-./csudb server --port 6789
-build_debug/bin/csudb-client -h 127.0.0.1 -p 6789
+build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
 ```
 
-OS 缓存实验可直接指定 Buffer Pool 字节数和替换策略。例如使用 32 个 8 KiB Frame 和 FIFO：
+连接后显示 CSUDB 2026 欢迎页和 `csudb [sys]>` 提示符。SQL 支持多行输入，以字符串外的 `;` 或 `\g` 提交；输入 `\help` 查看 Shell 命令，输入 `\q` 退出。
+
+OS 缓存实验参数属于服务端。例如 32 个 8 KiB Frame、CLOCK 和 positional I/O：
 
 ```bash
-./csudb --buffer-size 262144 --replacement fifo
+build_debug/bin/csudbd --data-dir /tmp/csudb-data \
+  --buffer-size 262144 --replacement clock --io-backend positional
 ```
 
-`--replacement` 支持 `lru`（默认）和 `fifo`。`csudb.log.<日期>` 中的 `[BUFFER_POOL_TRACE]` 是逐事件日志，进程退出时的 `[BUFFER_POOL_STATS]` 是汇总统计。完整 CLI 指南见 `docs/course/cli.md`，缓存实验方法见 `docs/course/os_storage.md`。
+正式安装到用户目录：
+
+```bash
+cmake --install build_debug --prefix "$HOME/.local"
+# 或：CSUDB_BUILD_DIR="$PWD/build_debug" ./scripts/install.sh --user
+```
+
+`--replacement` 支持 `lru`（默认）、`fifo` 和 `clock`；`--io-backend` 支持 `legacy`（默认，`lseek + read/write`）和 `positional`（可靠循环的 `pread/pwrite`）。名称大小写不敏感，未知值告警后分别回退 LRU/legacy。
+
+也可在 `etc/csudb.ini` 的 `[BUFFER_POOL]` 中设置 `BUFFER_SIZE`、`REPLACEMENT_POLICY` 和 `IO_BACKEND`；命令行显式参数优先。完整产品指南见 `docs/course/cli.md` 和 `docs/product/COMMANDS.md`，OS 实现与实验方法见 `docs/course/os_storage.md`。
 
 ## 11. 基础 SQL Demo
 
@@ -344,10 +378,10 @@ SELECT * FROM student;
 
 ```bash
 ./build.sh debug --make -j4
-gdb --args build_debug/bin/csudb
+gdb --args build_debug/bin/csudbd --data-dir /tmp/csudb-debug
 ```
 
-默认数据目录是启动工作目录下的 `csudb_data/`；调试临时数据时，可先进入单独的运行目录再启动 `build_debug/bin/csudb`。
+默认数据目录是启动工作目录下的 `csudb_data/`；调试时建议始终显式传入独立的 `--data-dir`。
 
 第一次追 SELECT 建议按顺序在这些位置下断点：
 
@@ -372,9 +406,11 @@ gdb --args build_debug/bin/csudb
 | AST/Parsed SQL Visualizer | `ParsedSqlNode`/`parse_defs.h` 只读 visitor |
 | Logical Plan Visualizer | `LogicalOperator`、`LogicalPlanGenerator` 输出边界 |
 | EXPLAIN 增强 | `explain_physical_operator.cpp`、`OptimizerUtils` |
-| Buffer Pool/Page Trace 增强 | `DiskBufferPool::get_this_page/allocate_page/unpin_page/flush_page` |
-| LRU/FIFO 扩展策略 | `BPFrameManager`；保持 Page 格式不变 |
-| OS I/O Trace | `DiskBufferPool::load_page/write_page` 的 `lseek + read/write` 边界 |
+| Buffer Pool/Page Trace 增强 | `BufferPoolSnapshot`、`BufferPoolStats`、现有 `[BUFFER_POOL_TRACE]` |
+| LRU-K/2Q/ARC | 新建 `ReplacementPolicy` 实现并接入 factory；保持 Page 格式不变 |
+| mmap/O_DIRECT | 新建 `PageIOBackend` 实现；先解决生命周期、同步与 alignment |
+| Background Cleaner | 复用 `flush_dirty_pages` 与 `FlushReason`，先验证 WAL/double-write ordering |
+| Read-ahead/Prefetch | `DiskBufferPool::load_page` miss 和 `PageIOBackend` 边界 |
 | B+Tree Visualizer | `BplusTreeHandler`、node handler 与 scanner 的只读快照接口 |
 | WAL/Recovery | `LogHandler`、`DiskLogHandler`、`IntegratedLogReplayer` |
 | MVCC | `Trx/TrxKit` 接口与 `MvccTrx`，不要绕开 Table/Record 日志链 |
@@ -388,7 +424,12 @@ gdb --args build_debug/bin/csudb
 - `docs/course/module_files.md`
 - `docs/course/baseline.md`
 - `docs/course/os_storage.md`
+- `docs/product/COMMANDS.md`
+- `docs/product/USER_GUIDE.md`
+- `docs/product/COMMAND_AUDIT.md`
+- `docs/product/ARCHITECTURE.md`
+- `docs/product/FUTURE.md`
 
 ## License and source attribution
 
-CSU-DBMS 的产品名称、CLI 与新增课程功能由本项目独立维护。仓库包含在木兰宽松许可证第 2 版下使用和修改的上游开源代码，因此依法保留原文件中的版权、专利、商标和免责声明；详见根目录 `License` 与 `NOTICE`。这些声明只用于履行开源许可，不代表上游对 CSU-DBMS 的背书。
+CSUDB 2026 的产品名称、CLI 与新增课程功能由本项目独立维护。仓库包含依法使用和修改的上游开源代码，因此保留相应源文件版权声明及根目录 `NOTICE`；这些声明只用于履行开源义务，不代表上游对 CSUDB 的背书。

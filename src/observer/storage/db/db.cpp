@@ -50,7 +50,8 @@ Db::~Db()
 }
 
 RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, const char *log_handler_name,
-    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy)
+    const char *storage_engine, int buffer_pool_memory_size, const char *buffer_pool_replacement_policy,
+    const char *page_io_backend)
 {
   RC rc = RC::SUCCESS;
 
@@ -88,7 +89,11 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
   if (!parse_buffer_pool_replacement_policy(buffer_pool_replacement_policy, replacement_policy)) {
     LOG_WARN("unknown buffer pool replacement policy '%s', fallback to LRU", buffer_pool_replacement_policy);
   }
-  buffer_pool_manager_ = make_unique<BufferPoolManager>(buffer_pool_memory_size, replacement_policy);
+  PageIOBackendType io_backend_type = PageIOBackendType::LEGACY;
+  if (!parse_page_io_backend(page_io_backend, io_backend_type)) {
+    LOG_WARN("unknown page I/O backend '%s', fallback to legacy", page_io_backend);
+  }
+  buffer_pool_manager_ = make_unique<BufferPoolManager>(buffer_pool_memory_size, replacement_policy, io_backend_type);
   auto dblwr_buffer    = make_unique<DiskDoubleWriteBuffer>(*buffer_pool_manager_);
 
   const char      *double_write_buffer_filename  = "dblwr.db";
