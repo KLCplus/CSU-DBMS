@@ -5,7 +5,7 @@
 
 #include "common/lang/string.h"
 #include "common/lang/vector.h"
-#include "storage/buffer/buffer_pool_stats.h"
+#include "storage/os/diagnostics/buffer_pool_stats.h"
 
 struct FrameSnapshot
 {

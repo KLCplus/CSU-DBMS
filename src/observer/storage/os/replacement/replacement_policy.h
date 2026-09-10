@@ -4,7 +4,7 @@
 
 #include "common/lang/memory.h"
 #include "common/lang/string.h"
-#include "storage/buffer/frame.h"
+#include "storage/os/page/frame.h"
 
 enum class BufferPoolReplacementPolicy
 {

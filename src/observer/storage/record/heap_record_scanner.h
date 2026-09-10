@@ -11,7 +11,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "storage/record/record_scanner.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/trx/trx.h"
 
 /**

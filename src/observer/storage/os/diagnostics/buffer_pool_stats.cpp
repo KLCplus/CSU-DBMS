@@ -1,5 +1,5 @@
 
-#include "storage/buffer/buffer_pool_stats.h"
+#include "storage/os/diagnostics/buffer_pool_stats.h"
 
 #include "common/lang/sstream.h"
 

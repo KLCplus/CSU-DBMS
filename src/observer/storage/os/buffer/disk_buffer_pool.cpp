@@ -8,8 +8,8 @@
 #include "common/lang/algorithm.h"
 #include "common/log/log.h"
 #include "common/math/crc.h"
-#include "storage/buffer/disk_buffer_pool.h"
-#include "storage/buffer/buffer_pool_log.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
+#include "storage/os/diagnostics/buffer_pool_log.h"
 #include "storage/db/db.h"
 
 using namespace common;

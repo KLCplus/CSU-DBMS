@@ -18,11 +18,11 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/defer.h"
 #include "storage/clog/log_handler.h"
 #include "storage/record/record.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/clog/log_entry.h"
 #include "storage/clog/vacuous_log_handler.h"
 #include "storage/record/record_manager.h"
-#include "storage/buffer/frame.h"
+#include "storage/os/page/frame.h"
 #include "storage/record/record_log.h"
 
 using namespace common;
