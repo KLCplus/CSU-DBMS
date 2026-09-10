@@ -53,11 +53,18 @@ RC InsertStmt::create(Db *db, const InsertSqlNode &inserts, Stmt *&stmt)
     const FieldMeta *field_meta = table_meta.field(table_meta.sys_field_num() + i);
     AttrType         field_type = field_meta->type();
     AttrType         value_type = values[i].attr_type();
+    if (values[i].is_null()) {
+      continue;
+    }
     if (value_type == field_type) {
       continue;
     }
     bool both_numeric = is_numerical_type(value_type) && is_numerical_type(field_type);
     if (both_numeric) {
+      continue;
+    }
+    // 允许字符串/整数字面量写入 DATE 字段，由 Table::make_record 负责转换
+    if (field_type == AttrType::DATES && (value_type == AttrType::CHARS || value_type == AttrType::INTS)) {
       continue;
     }
     LOG_WARN("field %s expects type %s but value[%d] is %s",

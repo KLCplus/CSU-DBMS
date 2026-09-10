@@ -227,8 +227,18 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
 
   for (int i = 0; i < value_num && OB_SUCC(rc); i++) {
     const FieldMeta *field = table_meta_.field(i + normal_field_start_index);
+    const int        field_index = i + normal_field_start_index;
     const Value &    value = values[i];
-    if (field->type() != value.attr_type()) {
+
+    if (value.is_null()) {
+      if (!field->nullable()) {
+        LOG_WARN("field '%s' is not nullable but got null value. table name:%s",
+            field->name(), table_meta_.name());
+        rc = RC::SCHEMA_FIELD_NOT_NULL;
+        break;
+      }
+      rc = set_value_to_record(record_data, value, field, field_index);
+    } else if (field->type() != value.attr_type()) {
       Value real_value;
       rc = Value::cast_to(value, field->type(), real_value);
       if (OB_FAIL(rc)) {
@@ -236,9 +246,9 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
             table_meta_.name(), field->name(), value.to_string().c_str());
         break;
       }
-      rc = set_value_to_record(record_data, real_value, field);
+      rc = set_value_to_record(record_data, real_value, field, field_index);
     } else {
-      rc = set_value_to_record(record_data, value, field);
+      rc = set_value_to_record(record_data, value, field, field_index);
     }
   }
   if (OB_FAIL(rc)) {
@@ -251,8 +261,15 @@ RC Table::make_record(int value_num, const Value *values, Record &record)
   return RC::SUCCESS;
 }
 
-RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field)
+RC Table::set_value_to_record(char *record_data, const Value &value, const FieldMeta *field, int field_index)
 {
+  if (value.is_null()) {
+    // 仅在 NULL 位图中标记，字段区域保持为 0
+    char *bitmap = record_data + table_meta_.null_bitmap_offset();
+    bitmap[field_index / 8] |= static_cast<char>(1 << (field_index % 8));
+    return RC::SUCCESS;
+  }
+
   size_t       copy_len = field->len();
   const size_t data_len = value.length();
   if (field->type() == AttrType::CHARS) {

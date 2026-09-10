@@ -196,6 +196,14 @@ public:
     FieldExpr       *field_expr = speces_[index];
     const FieldMeta *field_meta = field_expr->field().meta();
     cell.reset();
+
+    // 判断该字段是否为 NULL
+    const char *bitmap = this->record_->data() + table_->table_meta().null_bitmap_offset();
+    if (bitmap[index / 8] & (1 << (index % 8))) {
+      cell.set_null();
+      return RC::SUCCESS;
+    }
+
     cell.set_type(field_meta->type());
     cell.set_data(this->record_->data() + field_meta->offset(), field_meta->len());
     return RC::SUCCESS;
