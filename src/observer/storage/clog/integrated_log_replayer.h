@@ -15,7 +15,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "storage/clog/log_replayer.h"
-#include "storage/buffer/buffer_pool_log.h"
+#include "storage/os/diagnostics/buffer_pool_log.h"
 #include "storage/record/record_log.h"
 #include "storage/index/bplus_tree_log.h"
 #include "storage/trx/mvcc_trx_log.h"

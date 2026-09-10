@@ -1,4 +1,4 @@
-#include "storage/buffer/buffer_pool_diagnostics.h"
+#include "storage/os/diagnostics/buffer_pool_diagnostics.h"
 
 #include <atomic>
 

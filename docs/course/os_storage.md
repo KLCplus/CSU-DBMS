@@ -4,7 +4,7 @@
 
 ## 源码统一入口
 
-操作系统部分现在通过 `src/observer/storage/os/` 形成清晰的学习门面，目录依次为：
+操作系统部分的真实实现已迁移到 `src/observer/storage/os/`，目录依次为：
 
 ```text
 storage/os/
@@ -17,7 +17,7 @@ storage/os/
 └── os_storage.h   完整聚合入口
 ```
 
-这层门面不复制实现，也没有移动原有核心文件；因此 Table、Record、B+Tree、WAL 和事务模块原有 include 与调用链保持不变。详细阅读顺序见 `src/observer/storage/os/README.md`。
+Page、Frame、Buffer Pool、替换策略、Page I/O 与诊断源码都已物理迁入对应子目录。Table、Record、B+Tree、WAL 和事务模块只更新 include 路径，调用关系、类型、锁边界和磁盘格式保持不变。详细阅读顺序见 `src/observer/storage/os/README.md`。
 
 ## 1. 课程要求
 
@@ -43,7 +43,7 @@ Table / Index
 
 ## 3. Page / Frame 模型
 
-`src/observer/storage/buffer/page.h` 定义 `BP_PAGE_SIZE = 8192`：
+`src/observer/storage/os/page/page.h` 定义 `BP_PAGE_SIZE = 8192`：
 
 ```text
 Page (8192 bytes)
@@ -91,7 +91,7 @@ RecordFileHandler
 
 ## 6. Replacement Policy Architecture
 
-`storage/buffer/replacement/replacement_policy.h/.cpp` 定义统一 `ReplacementPolicy`：
+`storage/os/replacement/replacement_policy.h/.cpp` 定义统一 `ReplacementPolicy`：
 
 ```text
 BPFrameManager owns Frame cache
@@ -127,7 +127,7 @@ CLOCK 使用环形 FrameId 列表、clock hand 和 reference bit：插入或访�
 
 ## 10. Page I/O Backend
 
-`storage/buffer/page_io_backend.h/.cpp` 是目标分页文件的 Page I/O 边界：
+`storage/os/io/page_io_backend.h/.cpp` 是目标分页文件的 Page I/O 边界：
 
 ```text
 DiskBufferPool::load_page / write_page

@@ -16,7 +16,7 @@
 #include "event/sql_event.h"
 #include "net/communicator.h"
 #include "session/session.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/db/db.h"
 #include "storage/default/default_handler.h"
 

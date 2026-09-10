@@ -17,7 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/sys/rc.h"
 #include "common/lang/deque.h"
 #include "common/lang/vector.h"
-#include "storage/buffer/page.h"
+#include "storage/os/page/page.h"
 
 class Frame;
 class DiskBufferPool;

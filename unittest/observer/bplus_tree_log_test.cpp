@@ -23,7 +23,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/clog/integrated_log_replayer.h"
 #include "common/math/integer_generator.h"
 #include "common/thread/thread_pool_executor.h"
-#include "storage/buffer/double_write_buffer.h"
+#include "storage/os/buffer/double_write_buffer.h"
 
 using namespace std;
 using namespace common;
