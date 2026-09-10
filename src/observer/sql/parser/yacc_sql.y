@@ -85,6 +85,19 @@ char *unescape_quoted_string(char *quoted, int len)
   return out;
 }
 
+// 向 join_clause 累积列表追加一个 JOIN 子句（支持 JOIN / INNER JOIN）
+vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *relation_name, Expression *condition)
+{
+  if (join_list == nullptr) {
+    join_list = new vector<JoinSqlNode>;
+  }
+  join_list->emplace_back();
+  JoinSqlNode &node = join_list->back();
+  node.relation_name = relation_name;
+  node.condition.reset(condition);
+  return join_list;
+}
+
 %}
 
 %define api.pure full
@@ -135,6 +148,8 @@ char *unescape_quoted_string(char *quoted, int len)
         AND
         SET
         ON
+        JOIN
+        INNER
         LOAD
         DATA
         INFILE
@@ -169,6 +184,7 @@ char *unescape_quoted_string(char *quoted, int len)
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
   vector<string> *                           relation_list;
+  vector<JoinSqlNode> *                      join_list;
   vector<string> *                           key_list;
   char *                                     cstring;
   int                                        number;
@@ -185,6 +201,7 @@ char *unescape_quoted_string(char *quoted, int len)
 %destructor { delete $$; } <condition_list>
 // %destructor { delete $$; } <rel_attr_list>
 %destructor { delete $$; } <relation_list>
+%destructor { delete $$; } <join_list>
 %destructor { delete $$; } <key_list>
 
 %token <number> NUMBER
@@ -210,6 +227,7 @@ char *unescape_quoted_string(char *quoted, int len)
 %type <key_list>            primary_key
 %type <key_list>            attr_list
 %type <relation_list>       rel_list
+%type <join_list>           join_clause
 %type <expression>          expression
 %type <expression>          boolean_expr
 %type <expression>          comparison_predicate
@@ -528,7 +546,7 @@ update_stmt:      /*  update 语句的语法解析树*/
     }
     ;
 select_stmt:        /*  select 语句的语法解析树*/
-    SELECT expression_list FROM rel_list select_where group_by order_by
+    SELECT expression_list FROM rel_list join_clause select_where group_by order_by
     {
       $$ = new ParsedSqlNode(SCF_SELECT);
       if ($2 != nullptr) {
@@ -542,17 +560,22 @@ select_stmt:        /*  select 语句的语法解析树*/
       }
 
       if ($5 != nullptr) {
-        $$->selection.where_expression.reset($5);
+        $$->selection.joins.swap(*$5);
+        delete $5;
       }
 
       if ($6 != nullptr) {
-        $$->selection.group_by.swap(*$6);
-        delete $6;
+        $$->selection.where_expression.reset($6);
       }
 
       if ($7 != nullptr) {
-        $$->selection.order_by.swap(*$7);
+        $$->selection.group_by.swap(*$7);
         delete $7;
+      }
+
+      if ($8 != nullptr) {
+        $$->selection.order_by.swap(*$8);
+        delete $8;
       }
     }
     ;
@@ -654,6 +677,21 @@ rel_list:
       }
 
       $$->insert($$->begin(), $1);
+    }
+    ;
+
+join_clause:
+    /* empty */
+    {
+      $$ = nullptr;
+    }
+    | join_clause JOIN relation ON boolean_expr
+    {
+      $$ = append_join_node($1, $3, $5);
+    }
+    | join_clause INNER JOIN relation ON boolean_expr
+    {
+      $$ = append_join_node($1, $4, $6);
     }
     ;
 
