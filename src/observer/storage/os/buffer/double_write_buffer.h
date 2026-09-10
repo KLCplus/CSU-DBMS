@@ -5,7 +5,7 @@
 #include "common/lang/unordered_map.h"
 #include "common/types.h"
 #include "common/sys/rc.h"
-#include "storage/buffer/page.h"
+#include "storage/os/page/page.h"
 
 class DiskBufferPool;
 struct DoubleWritePage;

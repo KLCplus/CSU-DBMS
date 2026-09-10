@@ -3,7 +3,7 @@
 #include "common/lang/memory.h"
 #include "common/lang/string.h"
 #include "common/sys/rc.h"
-#include "storage/buffer/page.h"
+#include "storage/os/page/page.h"
 
 enum class PageIOBackendType
 {

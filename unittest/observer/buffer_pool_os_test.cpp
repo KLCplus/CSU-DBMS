@@ -12,8 +12,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "gtest/gtest.h"
 
-#include "storage/buffer/disk_buffer_pool.h"
-#include "storage/buffer/double_write_buffer.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/double_write_buffer.h"
 #include "storage/clog/vacuous_log_handler.h"
 
 using namespace std;

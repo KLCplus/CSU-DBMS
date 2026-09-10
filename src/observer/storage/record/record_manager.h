@@ -16,7 +16,7 @@ See the Mulan PSL v2 for more details. */
 
 #include "common/lang/bitmap.h"
 #include "common/lang/sstream.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/common/chunk.h"
 #include "storage/record/record.h"
 #include "storage/record/record_log.h"

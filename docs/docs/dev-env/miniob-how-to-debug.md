@@ -103,8 +103,8 @@ addr2line -pCfe ./bin/observer 0x4589c 0x5517f8 0x5329e0 0x166308 0x162c2c 0x210
 ?? ??:0
 common::lbt() at /root/miniob/deps/common/log/backtrace.cpp:118
 common::DebugMutex::unlock() at /root/miniob/deps/common/lang/mutex.cpp:273 (discriminator 25)
-Frame::write_unlatch(long) at /root/miniob/src/observer/storage/buffer/frame.cpp:113
-Frame::write_unlatch() at /root/miniob/src/observer/storage/buffer/frame.cpp:88
+Frame::write_unlatch(long) at /root/miniob/src/observer/storage/os/page/frame.cpp:113
+Frame::write_unlatch() at /root/miniob/src/observer/storage/os/page/frame.cpp:88
 RecordPageHandler::cleanup() at /root/miniob/src/observer/storage/record/record_manager.cpp:262
 RecordPageHandler::~RecordPageHandler() at /root/miniob/src/observer/storage/record/record_manager.cpp:96
 RowRecordPageHandler::~RowRecordPageHandler() at /root/miniob/src/observer/storage/record/record_manager.h:280

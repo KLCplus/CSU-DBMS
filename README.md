@@ -226,10 +226,10 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 
 | 概念 | 真实文件与核心类 | 输入 → 输出 | 适合的扩展点 |
 | --- | --- | --- | --- |
-| Page | `storage/buffer/page.h`：`Page` | 8 KiB 页（LSN、checksum、data） | Page dump/Trace |
-| Frame | `storage/buffer/frame.h/.cpp`：`Frame` | Page + page id + dirty + pin + latch | Pin/dirty 可视化 |
-| Buffer Pool | `storage/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | 生命周期与安全批量 Flush |
-| Replacement | `storage/buffer/replacement/replacement_policy.*` | Frame 生命周期事件 → victim | LRU/FIFO/CLOCK；可扩展 LRU-K/2Q |
+| Page | `storage/os/page/page.h`：`Page` | 8 KiB 页（LSN、checksum、data） | Page dump/Trace |
+| Frame | `storage/os/page/frame.h/.cpp`：`Frame` | Page + page id + dirty + pin + latch | Pin/dirty 可视化 |
+| Buffer Pool | `storage/os/buffer/disk_buffer_pool.h/.cpp`：`BPFrameManager`、`DiskBufferPool`、`BufferPoolManager` | `(buffer_pool_id, page_num)` → pinned `Frame *` | 生命周期与安全批量 Flush |
+| Replacement | `storage/os/replacement/replacement_policy.*` | Frame 生命周期事件 → victim | LRU/FIFO/CLOCK；可扩展 LRU-K/2Q |
 | Buffer Diagnostics | `buffer_pool_stats.*`、`buffer_pool_diagnostics.*` | Buffer 事件 → Stats/Snapshot DTO | CLI/GUI/实验工具只读消费 |
 | Disk I/O | `page_io_backend.*`、`src/common/io/io.*` | Page + offset ↔ 目标分页文件 | legacy `lseek/read/write`；positional `pread/pwrite` |
 | Record/RID | `storage/record/record.h`、`record_manager.h/.cpp` | 字节记录/RID ↔ record page slot | Record/Page 布局展示 |

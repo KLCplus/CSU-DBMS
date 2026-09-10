@@ -1,7 +1,8 @@
 # CSUDB OS / Storage module
 
-This directory is the stable reading and extension entrance for the operating-system part of CSUDB.
-It organizes the existing storage implementation without moving or duplicating mature MiniOB code.
+This directory contains the real operating-system storage implementation of CSUDB. The former
+`storage/buffer/` sources were physically reorganized here and every internal consumer now includes
+the new paths. The implementation and runtime behavior remain single-source.
 
 ## 中文学习入口
 
@@ -14,7 +15,7 @@ It organizes the existing storage implementation without moving or duplicating m
 5. `diagnostics/diagnostics.h`：理解命中率、磁盘 I/O、Trace 和 Frame Snapshot。
 6. `record/record_page.h`：最后回到数据库层，看 Record、RID、slot 如何映射到 Page。
 
-这些入口只聚合真实源码，类和函数仍只有一份。调试时应继续在表格“Existing implementation”列出的真实文件中下断点。
+`page/`、`buffer/`、`replacement/`、`io/` 和 `diagnostics/` 中放置的是真实实现；`record/` 是通往现有数据库 Record 模块的边界入口。类和函数仍只有一份。
 
 ```text
 Database executor
@@ -41,20 +42,20 @@ Linux VFS / filesystem / disk
 | Entrance | Responsibility | Existing implementation |
 | --- | --- | --- |
 | `record/record_page.h` | Record/RID to page mapping and scanning | `storage/record/` |
-| `page/page_model.h` | 8 KiB Page and in-memory Frame | `storage/buffer/page.h`, `frame.h` |
-| `buffer/buffer_pool.h` | allocation, pin/unpin, dirty pages, load/flush | `storage/buffer/disk_buffer_pool.*` |
-| `replacement/replacement.h` | replaceable-frame selection | `storage/buffer/replacement/` |
-| `io/page_io.h` | legacy and positional page-file I/O | `storage/buffer/page_io_backend.*`, `common/io/` |
-| `diagnostics/diagnostics.h` | stats, snapshots, traces and flush reasons | `storage/buffer/buffer_pool_*` |
+| `page/page_model.h` | 8 KiB Page and in-memory Frame | `storage/os/page/page.h`, `frame.h` |
+| `buffer/buffer_pool.h` | allocation, pin/unpin, dirty pages, load/flush | `storage/os/buffer/disk_buffer_pool.*` |
+| `replacement/replacement.h` | replaceable-frame selection | `storage/os/replacement/` |
+| `io/page_io.h` | legacy and positional page-file I/O | `storage/os/io/page_io_backend.*`, `common/io/` |
+| `diagnostics/diagnostics.h` | stats, snapshots, traces and flush reasons | `storage/os/diagnostics/buffer_pool_*` |
 | `os_storage.h` | umbrella entrance for tools and course experiments | all entrances above |
 
-## Why the implementation is not physically moved
+## Refactoring boundary
 
-The original paths are included by Record, Table, B+Tree, transaction, WAL and recovery code. Moving them
-would create a large mechanical rewrite with no runtime value and a high regression risk. These facade headers
-provide one coherent OS module boundary while preserving every existing include path, symbol, file format and
-lock boundary.
+Page, Frame, Buffer Pool, replacement policies, page I/O backends and diagnostics were physically moved into
+this directory. Record, Table, B+Tree, transaction, WAL and recovery remain in their database-owned modules;
+only their include paths changed. Public symbols, on-disk formats, ownership rules and lock boundaries were not
+redesigned.
 
 New course-level OS tools should include the narrowest entrance header. Use `os_storage.h` only when a tool
-needs the complete storage view. New production implementation should remain next to the subsystem that owns
-it; this directory is a public organization layer, not a second implementation.
+needs the complete storage view. New implementation belongs in the matching OS subdirectory; do not recreate
+compatibility copies under the removed `storage/buffer/` path.

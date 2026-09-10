@@ -26,7 +26,7 @@ See the Mulan PSL v2 for more details. */
 #include "session/session.h"
 #include "session/session_stage.h"
 #include "sql/plan_cache/plan_cache_stage.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/default/default_handler.h"
 #include "storage/trx/trx.h"
 

@@ -13,8 +13,8 @@ See the Mulan PSL v2 for more details. */
 //
 #include <fcntl.h>
 
-#include "storage/buffer/double_write_buffer.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/double_write_buffer.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "common/io/io.h"
 #include "common/log/log.h"
 #include "common/math/crc.h"
