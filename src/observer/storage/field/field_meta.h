@@ -42,6 +42,8 @@ public:
   int         len() const;
   bool        visible() const;
   int         field_id() const;
+  bool        nullable() const { return nullable_; }
+  void        set_nullable(bool nullable) { nullable_ = nullable; }
 
 public:
   void desc(ostream &os) const;
@@ -57,4 +59,5 @@ protected:
   int      attr_len_;
   bool     visible_;
   int      field_id_;
+  bool     nullable_ = true;
 };

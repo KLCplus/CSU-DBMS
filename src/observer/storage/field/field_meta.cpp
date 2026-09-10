@@ -25,6 +25,7 @@ const static Json::StaticString FIELD_OFFSET("offset");
 const static Json::StaticString FIELD_LEN("len");
 const static Json::StaticString FIELD_VISIBLE("visible");
 const static Json::StaticString FIELD_FIELD_ID("FIELD_id");
+const static Json::StaticString FIELD_NULLABLE("nullable");
 
 FieldMeta::FieldMeta() : attr_type_(AttrType::UNDEFINED), attr_offset_(-1), attr_len_(0), visible_(false), field_id_(0) {}
 
@@ -84,6 +85,7 @@ void FieldMeta::to_json(Json::Value &json_value) const
   json_value[FIELD_LEN]     = attr_len_;
   json_value[FIELD_VISIBLE] = visible_;
   json_value[FIELD_FIELD_ID] = field_id_;
+  json_value[FIELD_NULLABLE] = nullable_;
 }
 
 RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
@@ -137,5 +139,13 @@ RC FieldMeta::from_json(const Json::Value &json_value, FieldMeta &field)
   int         len     = len_value.asInt();
   bool        visible = visible_value.asBool();
   int         field_id  = field_id_value.asInt();
-  return field.init(name, type, offset, len, visible, field_id);
+  RC rc = field.init(name, type, offset, len, visible, field_id);
+  if (rc != RC::SUCCESS) {
+    return rc;
+  }
+
+  const Json::Value &nullable_value = json_value[FIELD_NULLABLE];
+  // 兼容旧版本元数据：没有 nullable 字段时默认为允许 NULL
+  field.set_nullable(nullable_value.isBool() ? nullable_value.asBool() : true);
+  return RC::SUCCESS;
 }
