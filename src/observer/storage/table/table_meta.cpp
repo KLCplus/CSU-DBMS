@@ -35,7 +35,8 @@ TableMeta::TableMeta(const TableMeta &other)
       indexes_(other.indexes_),
       storage_format_(other.storage_format_),
       storage_engine_(other.storage_engine_),
-      record_size_(other.record_size_)
+      record_size_(other.record_size_),
+      null_bitmap_offset_(other.null_bitmap_offset_)
 {}
 
 void TableMeta::swap(TableMeta &other) noexcept
@@ -44,6 +45,7 @@ void TableMeta::swap(TableMeta &other) noexcept
   fields_.swap(other.fields_);
   indexes_.swap(other.indexes_);
   std::swap(record_size_, other.record_size_);
+  std::swap(null_bitmap_offset_, other.null_bitmap_offset_);
 }
 
 RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *trx_fields,
@@ -90,11 +92,13 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
       return rc;
     }
 
+    fields_[i + trx_field_num].set_nullable(attr_info.nullable);
     field_offset += attr_info.length;
   }
 
   primary_keys_ = primary_keys;
-  record_size_ = field_offset;
+  null_bitmap_offset_ = field_offset;
+  record_size_ = field_offset + null_bitmap_size();
 
   table_id_ = table_id;
   name_     = name;
@@ -288,6 +292,8 @@ int TableMeta::deserialize(istream &is)
   name_.swap(table_name);
   fields_.swap(fields);
   record_size_ = fields_.back().offset() + fields_.back().len() - fields_.begin()->offset();
+  null_bitmap_offset_ = record_size_;
+  record_size_ += (field_num + 7) / 8;
 
   for (const FieldMeta &field_meta : fields_) {
     if (!field_meta.visible()) {

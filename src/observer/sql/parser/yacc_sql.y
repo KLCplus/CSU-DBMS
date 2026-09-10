@@ -138,6 +138,7 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
         STRING_T
         FLOAT_T
         VECTOR_T
+        DATE
         HELP
         EXIT
         DOT //QUOTE
@@ -168,6 +169,8 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
         LE
         GE
         NE
+        IS
+        NULL_T
 
 /** union 中定义各种数据类型，真实生成的代码也是union类型，所以不能有非POD类型的数据 **/
 %union {
@@ -220,6 +223,7 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
 %type <rel_attr>            rel_attr
 %type <attr_infos>          attr_def_list
 %type <attr_info>           attr_def
+%type <number>              null_def
 %type <value_list>          value_list
 %type <condition_list>      where
 %type <condition_list>      condition_list
@@ -421,19 +425,35 @@ attr_def_list:
     ;
     
 attr_def:
-    ID type LBRACE number RBRACE 
+    ID type LBRACE number RBRACE null_def
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = $4;
+      $$->nullable = ($6 != 0);
     }
-    | ID type
+    | ID type null_def
     {
       $$ = new AttrInfoSqlNode;
       $$->type = (AttrType)$2;
       $$->name = $1;
       $$->length = 4;
+      $$->nullable = ($3 != 0);
+    }
+    ;
+null_def:
+    /* empty */
+    {
+      $$ = 1;  // 默认允许 NULL
+    }
+    | NULL_T
+    {
+      $$ = 1;
+    }
+    | NOT NULL_T
+    {
+      $$ = 0;
     }
     ;
 number:
@@ -444,6 +464,7 @@ type:
     | STRING_T { $$ = static_cast<int>(AttrType::CHARS); }
     | FLOAT_T  { $$ = static_cast<int>(AttrType::FLOATS); }
     | VECTOR_T { $$ = static_cast<int>(AttrType::VECTORS); }
+    | DATE     { $$ = static_cast<int>(AttrType::DATES); }
     ;
 primary_key:
     /* empty */
@@ -508,6 +529,11 @@ value:
       char *tmp = common::substr($1,1,strlen($1)-2);
       $$ = new Value(tmp);
       free(tmp);
+    }
+    | NULL_T {
+      $$ = new Value();
+      $$->set_null();
+      @$ = @1;
     }
     ;
 storage_format:
@@ -746,6 +772,12 @@ boolean_expr:
 comparison_predicate:
     expression comp_op expression {
       $$ = set_expr_name_and_location(new ComparisonExpr($2, unique_ptr<Expression>($1), unique_ptr<Expression>($3)), sql_string, &@$);
+    }
+    | expression IS NULL_T {
+      $$ = set_expr_name_and_location(new ComparisonExpr(IS_NULL, unique_ptr<Expression>($1), unique_ptr<Expression>(new ValueExpr(Value::null_value()))), sql_string, &@$);
+    }
+    | expression IS NOT NULL_T {
+      $$ = set_expr_name_and_location(new ComparisonExpr(IS_NOT_NULL, unique_ptr<Expression>($1), unique_ptr<Expression>(new ValueExpr(Value::null_value()))), sql_string, &@$);
     }
     ;
 condition_list:

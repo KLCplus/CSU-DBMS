@@ -41,6 +41,14 @@ public:
 
   ~Value() { reset(); }
 
+  /// 构造一个 NULL 值
+  static Value null_value()
+  {
+    Value v;
+    v.set_null();
+    return v;
+  }
+
   Value(AttrType attr_type, char *data, int length = 4) : attr_type_(attr_type) { this->set_data(data, length); }
 
   explicit Value(int val);
@@ -84,6 +92,13 @@ public:
 
   static RC cast_to(const Value &value, AttrType to_type, Value &result)
   {
+    if (value.is_null()) {
+      result.set_null();
+      return RC::SUCCESS;
+    }
+    if (to_type == AttrType::DATES) {
+      return DataType::type_instance(AttrType::DATES)->cast_to(value, to_type, result);
+    }
     return DataType::type_instance(value.attr_type())->cast_to(value, to_type, result);
   }
 
@@ -92,6 +107,13 @@ public:
   void set_data(const char *data, int length) { this->set_data(const_cast<char *>(data), length); }
   void set_value(const Value &value);
   void set_boolean(bool val);
+
+  bool is_null() const { return is_null_; }
+  void set_null()
+  {
+    reset();
+    is_null_ = true;
+  }
 
   string to_string() const;
 
@@ -134,4 +156,7 @@ private:
 
   /// 是否申请并占有内存, 目前对于 CHARS 类型 own_data_ 为true, 其余类型 own_data_ 为false
   bool own_data_ = false;
+
+  /// 是否为 NULL 值（三值逻辑），与 attr_type_ 解耦，NULL 值没有具体类型
+  bool is_null_ = false;
 };

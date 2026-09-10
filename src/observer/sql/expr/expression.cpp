@@ -141,7 +141,24 @@ ComparisonExpr::~ComparisonExpr() {}
 
 RC ComparisonExpr::compare_value(const Value &left, const Value &right, bool &result) const
 {
-  RC  rc         = RC::SUCCESS;
+  RC rc = RC::SUCCESS;
+
+  // IS [NOT] NULL 永远返回确定值，与三值逻辑无关
+  if (comp_ == IS_NULL) {
+    result = left.is_null();
+    return rc;
+  }
+  if (comp_ == IS_NOT_NULL) {
+    result = !left.is_null();
+    return rc;
+  }
+
+  // 三值逻辑：任一操作数为 NULL 时，比较结果为 unknown，在 WHERE 中按 false 处理（不满足条件）
+  if (left.is_null() || right.is_null()) {
+    result = false;
+    return rc;
+  }
+
   int cmp_result = left.compare(right);
   result         = false;
   switch (comp_) {
@@ -595,6 +612,22 @@ unique_ptr<Aggregator> AggregateExpr::create_aggregator() const
   switch (aggregate_type_) {
     case Type::SUM: {
       aggregator = make_unique<SumAggregator>();
+      break;
+    }
+    case Type::COUNT: {
+      aggregator = make_unique<CountAggregator>();
+      break;
+    }
+    case Type::AVG: {
+      aggregator = make_unique<AvgAggregator>();
+      break;
+    }
+    case Type::MIN: {
+      aggregator = make_unique<MinAggregator>();
+      break;
+    }
+    case Type::MAX: {
+      aggregator = make_unique<MaxAggregator>();
       break;
     }
     default: {
