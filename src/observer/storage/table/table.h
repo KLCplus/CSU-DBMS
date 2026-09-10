@@ -122,7 +122,7 @@ public:
   RC sync();
 
 private:
-  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field);
+  RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field, int field_index);
 
 private:
   // RC init_record_handler(const char *base_dir);
