@@ -19,6 +19,8 @@ storage/os/
 
 Page、Frame、Buffer Pool、替换策略、Page I/O 与诊断源码都已物理迁入对应子目录。Table、Record、B+Tree、WAL 和事务模块只更新 include 路径，调用关系、类型、锁边界和磁盘格式保持不变。详细阅读顺序见 `src/observer/storage/os/README.md`。
 
+如果目标是逐文件学习源码，请配合阅读 [`os_source_guide.md`](os_source_guide.md)。该文档专门说明每个目录、文件和核心类的职责，以及 SELECT、INSERT、页淘汰和刷盘的真实调用链。
+
 ## 1. 课程要求
 
 Course Core 已覆盖：固定大小页的分配、释放、读写；Record/RID 到 Page 的映射；有限容量缓存；LRU/FIFO；命中与 I/O 统计；页替换日志；正常关闭与重启持久化。

@@ -4,6 +4,8 @@ This directory contains the real operating-system storage implementation of CSUD
 `storage/buffer/` sources were physically reorganized here and every internal consumer now includes
 the new paths. The implementation and runtime behavior remain single-source.
 
+The file-by-file Chinese reading guide is available at `docs/course/os_source_guide.md`.
+
 ## 中文学习入口
 
 这里是 CSUDB 操作系统与存储部分的统一入口，不是第二套实现。建议按照下面的顺序阅读：
