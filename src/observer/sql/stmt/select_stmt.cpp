@@ -61,6 +61,25 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     table_map.insert({table_name, table});
   }
 
+  // collect tables from explicit JOIN clauses（语义等价于加入 from 列表）
+  for (size_t i = 0; i < select_sql.joins.size(); i++) {
+    const char *table_name = select_sql.joins[i].relation_name.c_str();
+    if (nullptr == table_name) {
+      LOG_WARN("invalid argument. join relation name is null. index=%d", i);
+      return RC::INVALID_ARGUMENT;
+    }
+
+    Table *table = db->find_table(table_name);
+    if (nullptr == table) {
+      LOG_WARN("no such table. db=%s, table_name=%s", db->name(), table_name);
+      return RC::SCHEMA_TABLE_NOT_EXIST;
+    }
+
+    binder_context.add_table(table);
+    tables.push_back(table);
+    table_map.insert({table_name, table});
+  }
+
   // collect query fields in `select` statement
   vector<unique_ptr<Expression>> bound_expressions;
   ExpressionBinder expression_binder(binder_context);
@@ -125,13 +144,49 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     where_expression = std::move(bound_where[0]);
   }
 
+  // 绑定 JOIN ON 条件，后续与 WHERE 条件用 AND 合并
+  vector<unique_ptr<Expression>> join_conditions;
+  for (size_t i = 0; i < select_sql.joins.size(); i++) {
+    unique_ptr<Expression> &join_condition = select_sql.joins[i].condition;
+    if (join_condition == nullptr) {
+      continue;
+    }
+    vector<unique_ptr<Expression>> bound_cond;
+    rc = expression_binder.bind_expression(join_condition, bound_cond);
+    if (OB_FAIL(rc)) {
+      LOG_WARN("bind join condition failed. rc=%s", strrc(rc));
+      return rc;
+    }
+    if (bound_cond.size() != 1) {
+      LOG_WARN("invalid join condition result count. count=%d", static_cast<int>(bound_cond.size()));
+      return rc;
+    }
+    join_conditions.emplace_back(std::move(bound_cond[0]));
+  }
+
+  // 合并 WHERE 与 JOIN ON 条件（内连接 ON 等价于 WHERE）
+  vector<unique_ptr<Expression>> all_where_conditions;
+  if (where_expression != nullptr) {
+    all_where_conditions.emplace_back(std::move(where_expression));
+  }
+  for (unique_ptr<Expression> &cond : join_conditions) {
+    all_where_conditions.emplace_back(std::move(cond));
+  }
+
+  unique_ptr<Expression> final_where_expression;
+  if (all_where_conditions.size() == 1) {
+    final_where_expression = std::move(all_where_conditions[0]);
+  } else if (all_where_conditions.size() > 1) {
+    final_where_expression = make_unique<ConjunctionExpr>(ConjunctionExpr::Type::AND, all_where_conditions);
+  }
+
   // everything alright
   SelectStmt *select_stmt = new SelectStmt();
 
   select_stmt->tables_.swap(tables);
   select_stmt->query_expressions_.swap(bound_expressions);
   select_stmt->filter_stmt_ = filter_stmt;
-  select_stmt->where_expression_ = std::move(where_expression);
+  select_stmt->where_expression_ = std::move(final_where_expression);
   select_stmt->group_by_.swap(group_by_expressions);
   select_stmt->order_by_.swap(order_by_expressions);
   stmt                      = select_stmt;
