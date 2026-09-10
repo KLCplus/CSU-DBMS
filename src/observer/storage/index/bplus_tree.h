@@ -25,7 +25,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/functional.h"
 #include "common/log/log.h"
 #include "sql/parser/parse_defs.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/record/record_manager.h"
 #include "storage/index/latch_memo.h"
 #include "storage/index/bplus_tree_log.h"

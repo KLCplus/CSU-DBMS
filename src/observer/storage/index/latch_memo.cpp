@@ -14,8 +14,8 @@ See the Mulan PSL v2 for more details. */
 
 #include "storage/index/latch_memo.h"
 #include "common/lang/mutex.h"
-#include "storage/buffer/disk_buffer_pool.h"
-#include "storage/buffer/frame.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
+#include "storage/os/page/frame.h"
 
 LatchMemoItem::LatchMemoItem(LatchMemoType type, Frame *frame)
 {

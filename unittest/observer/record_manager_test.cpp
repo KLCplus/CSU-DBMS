@@ -17,12 +17,12 @@ See the Mulan PSL v2 for more details. */
 #include <filesystem>
 #include <utility>
 
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/record/record_manager.h"
 #include "storage/trx/vacuous_trx.h"
 #include "storage/clog/vacuous_log_handler.h"
 #include "storage/clog/disk_log_handler.h"
-#include "storage/buffer/double_write_buffer.h"
+#include "storage/os/buffer/double_write_buffer.h"
 #include "common/math/integer_generator.h"
 #include "common/thread/thread_pool_executor.h"
 #include "storage/clog/integrated_log_replayer.h"

@@ -19,7 +19,7 @@
 | `src/observer/sql/optimizer/logical_plan_generator.cpp` | 编译器 IR 生成与数据库逻辑算子的交界 |
 | `src/observer/sql/operator/table_scan_physical_operator.cpp` | 数据库执行器向存储层发起扫描 |
 | `src/observer/storage/record/record_manager.cpp` | 数据库的 Record/RID 映射到 OS 页式存储 |
-| `src/observer/storage/buffer/disk_buffer_pool.cpp` | 数据库 Page/Frame 通过 ReplacementPolicy 与 PageIOBackend 映射到 OS 文件 I/O |
+| `src/observer/storage/os/buffer/disk_buffer_pool.cpp` | 数据库 Page/Frame 通过 ReplacementPolicy 与 PageIOBackend 映射到 OS 文件 I/O |
 | `src/observer/storage/db/db.cpp` | 数据库生命周期组织 Buffer Pool、Log、Transaction 和 Recovery |
 
 当前完整主链：
@@ -361,19 +361,19 @@ lsm_mvcc_trx.h / lsm_mvcc_trx.cpp
 
 ### 4.1 Page、Frame、Buffer Pool 与替换策略
 
-目录：`src/observer/storage/buffer/`
+目录：`src/observer/storage/os/`
 
 | 文件组 | 责任 | 优先级 |
 | --- | --- | --- |
-| `page.h` | 固定 8 KiB Page 的二进制布局、LSN 和 checksum | P0 |
-| `frame.h`, `frame.cpp` | 内存 Frame、Page、dirty、pin、latch、访问时间 | P0 |
-| `disk_buffer_pool.h`, `disk_buffer_pool.cpp` | 页文件、页分配/释放、Frame 管理、策略与 I/O 委托、Flush | P0 |
+| `page/page.h` | 固定 8 KiB Page 的二进制布局、LSN 和 checksum | P0 |
+| `page/frame.h`, `page/frame.cpp` | 内存 Frame、Page、dirty、pin、latch、访问时间 | P0 |
+| `buffer/disk_buffer_pool.h`, `buffer/disk_buffer_pool.cpp` | 页文件、页分配/释放、Frame 管理、策略与 I/O 委托、Flush | P0 |
 | `replacement/replacement_policy.h`, `.cpp` | 可插拔 LRU/FIFO/CLOCK 与 victim 选择 | P0 |
-| `page_io_backend.h`, `page_io_backend.cpp` | legacy/positional Page I/O 后端 | P0 |
-| `buffer_pool_stats.h`, `buffer_pool_stats.cpp` | hit/miss、pin、I/O/延迟、淘汰、dirty、分类 flush | P0 |
-| `buffer_pool_diagnostics.h`, `.cpp` | Snapshot DTO、Dirty Flush 结果、Trace event sequence | P0 |
-| `buffer_pool_log.h`, `buffer_pool_log.cpp` | Buffer Pool WAL 与回放 | P2 |
-| `double_write_buffer.h`, `double_write_buffer.cpp` | Double Write 防止 torn page | P2 |
+| `io/page_io_backend.h`, `io/page_io_backend.cpp` | legacy/positional Page I/O 后端 | P0 |
+| `diagnostics/buffer_pool_stats.h`, `.cpp` | hit/miss、pin、I/O/延迟、淘汰、dirty、分类 flush | P0 |
+| `diagnostics/buffer_pool_diagnostics.h`, `.cpp` | Snapshot DTO、Dirty Flush 结果、Trace event sequence | P0 |
+| `diagnostics/buffer_pool_log.h`, `.cpp` | Buffer Pool WAL 与回放 | P2 |
+| `buffer/double_write_buffer.h`, `.cpp` | Double Write 防止 torn page | P2 |
 
 当前 `page.h` 中：
 
@@ -443,8 +443,8 @@ vacuous_log_handler.h
 相关跨模块日志文件：
 
 ```text
-src/observer/storage/buffer/buffer_pool_log.h
-src/observer/storage/buffer/buffer_pool_log.cpp
+src/observer/storage/os/diagnostics/buffer_pool_log.h
+src/observer/storage/os/diagnostics/buffer_pool_log.cpp
 src/observer/storage/record/record_log.h
 src/observer/storage/record/record_log.cpp
 src/observer/storage/index/bplus_tree_log.h
@@ -674,7 +674,7 @@ src/observer/sql/optimizer/optimize_stage.cpp
 src/observer/sql/executor/sql_result.cpp
 src/observer/storage/table/table.cpp
 src/observer/storage/record/record_manager.cpp
-src/observer/storage/buffer/disk_buffer_pool.cpp
+src/observer/storage/os/buffer/disk_buffer_pool.cpp
 src/observer/storage/db/db.cpp
 ```
 

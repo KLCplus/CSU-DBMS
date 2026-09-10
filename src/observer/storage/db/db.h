@@ -21,9 +21,9 @@ See the Mulan PSL v2 for more details. */
 #include "common/lang/memory.h"
 #include "common/lang/span.h"
 #include "sql/parser/parse_defs.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/clog/disk_log_handler.h"
-#include "storage/buffer/double_write_buffer.h"
+#include "storage/os/buffer/double_write_buffer.h"
 #include "oblsm/include/ob_lsm.h"
 
 class Table;

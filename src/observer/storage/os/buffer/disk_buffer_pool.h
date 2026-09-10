@@ -21,13 +21,13 @@
 #include "common/mm/mem_pool.h"
 #include "common/sys/rc.h"
 #include "common/types.h"
-#include "storage/buffer/frame.h"
-#include "storage/buffer/page.h"
-#include "storage/buffer/buffer_pool_log.h"
-#include "storage/buffer/buffer_pool_stats.h"
-#include "storage/buffer/buffer_pool_diagnostics.h"
-#include "storage/buffer/page_io_backend.h"
-#include "storage/buffer/replacement/replacement_policy.h"
+#include "storage/os/page/frame.h"
+#include "storage/os/page/page.h"
+#include "storage/os/diagnostics/buffer_pool_log.h"
+#include "storage/os/diagnostics/buffer_pool_stats.h"
+#include "storage/os/diagnostics/buffer_pool_diagnostics.h"
+#include "storage/os/io/page_io_backend.h"
+#include "storage/os/replacement/replacement_policy.h"
 
 class BufferPoolManager;
 class DiskBufferPool;

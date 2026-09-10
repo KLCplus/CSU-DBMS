@@ -11,7 +11,7 @@
 #include "common/lang/unordered_map.h"
 #include "common/log/log.h"
 #include "common/types.h"
-#include "storage/buffer/page.h"
+#include "storage/os/page/page.h"
 
 class BufferPoolStats;
 

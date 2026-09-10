@@ -16,10 +16,10 @@ See the Mulan PSL v2 for more details. */
 
 #include "gtest/gtest.h"
 #include "common/log/log.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/clog/disk_log_handler.h"
-#include "storage/buffer/buffer_pool_log.h"
-#include "storage/buffer/double_write_buffer.h"
+#include "storage/os/diagnostics/buffer_pool_log.h"
+#include "storage/os/buffer/double_write_buffer.h"
 
 using namespace std;
 using namespace common;

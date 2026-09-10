@@ -1,7 +1,7 @@
 
 
-#include "storage/buffer/buffer_pool_log.h"
-#include "storage/buffer/disk_buffer_pool.h"
+#include "storage/os/diagnostics/buffer_pool_log.h"
+#include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/clog/log_handler.h"
 #include "storage/clog/log_entry.h"
 

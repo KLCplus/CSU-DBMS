@@ -12,8 +12,8 @@ See the Mulan PSL v2 for more details. */
 // Created by lianyu on 2022/10/29.
 //
 
-#include "storage/buffer/frame.h"
-#include "storage/buffer/buffer_pool_stats.h"
+#include "storage/os/page/frame.h"
+#include "storage/os/diagnostics/buffer_pool_stats.h"
 #include "session/session.h"
 #include "session/thread_data.h"
 
