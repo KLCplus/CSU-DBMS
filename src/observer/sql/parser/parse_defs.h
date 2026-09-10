@@ -86,6 +86,18 @@ struct ConditionSqlNode
  * 甚至可以包含复杂的表达式。
  */
 
+/**
+ * @brief 描述一个显式 JOIN 子句
+ * @ingroup SQLParser
+ * @details 支持 `JOIN table ON condition`，一个 select 语句可以包含多个 join。
+ * 语义上等价于把该表加入 from 列表，并把 ON 条件与 WHERE 条件用 AND 合并。
+ */
+struct JoinSqlNode
+{
+  string                 relation_name;  ///< join 的表名
+  unique_ptr<Expression> condition;      ///< ON 条件
+};
+
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
@@ -94,6 +106,7 @@ struct SelectSqlNode
   unique_ptr<Expression>         where_expression;  ///< WHERE 布尔表达式（支持 AND/OR/NOT/括号/算术）
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
   vector<unique_ptr<Expression>> order_by;     ///< order by clause
+  vector<JoinSqlNode>            joins;        ///< 显式 JOIN 子句
 };
 
 /**
