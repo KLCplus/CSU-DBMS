@@ -22,6 +22,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/os/path.h"
 #include "common/global_context.h"
 #include "storage/common/meta_util.h"
+#include "storage/catalog/schema_catalog.h"
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 #include "storage/trx/trx.h"
@@ -29,6 +30,8 @@ See the Mulan PSL v2 for more details. */
 #include "storage/clog/integrated_log_replayer.h"
 
 using namespace common;
+
+Db::Db() = default;
 
 Db::~Db()
 {
@@ -136,7 +139,14 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
     return rc;
   }
 
-  // 打开所有表
+  // Catalog has a compiled-in schema, so it must be opened before ordinary tables.
+  rc = open_schema_catalog();
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to bootstrap schema catalog. dbpath=%s, rc=%s", dbpath, strrc(rc));
+    return rc;
+  }
+
+  // Open ordinary tables from the catalog, then migrate legacy-only .table files.
   // 在实际生产数据库中，直接打开所有表，可能耗时会比较长
   rc = open_all_tables();
   if (OB_FAIL(rc)) {
@@ -157,12 +167,24 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
     return rc;
   }
 
+  // Catalog writes use the normal Record/Page logging path, so they are done
+  // only after recovery has started the log handler.
+  rc = finish_schema_catalog_bootstrap();
+  if (OB_FAIL(rc)) {
+    LOG_WARN("failed to finish schema catalog bootstrap. dbpath=%s, rc=%s", dbpath, strrc(rc));
+    return rc;
+  }
+
   return rc;
 }
 
 RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string>& primary_keys, const StorageFormat storage_format)
 {
   RC rc = RC::SUCCESS;
+  if (SchemaCatalog::is_reserved_name(table_name)) {
+    LOG_WARN("Table name is reserved for the schema catalog: %s", table_name);
+    return RC::SCHEMA_TABLE_EXIST;
+  }
   // check table_name
   if (opened_tables_.count(table_name) != 0) {
     LOG_WARN("%s has been opened before.", table_name);
@@ -181,9 +203,25 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
     return rc;
   }
 
+  rc = schema_catalog_->register_table(table->table_meta());
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to register table in schema catalog. table=%s rc=%s", table_name, strrc(rc));
+    delete table;
+    error_code ec;
+    filesystem::remove(table_meta_file(path_.c_str(), table_name), ec);
+    ec.clear();
+    filesystem::remove(table_data_file(path_.c_str(), table_name), ec);
+    return rc;
+  }
+
   opened_tables_[table_name] = table;
   LOG_INFO("Create table success. table name=%s, table_id:%d", table_name, table_id);
   return RC::SUCCESS;
+}
+
+RC Db::register_index(const TableMeta &table_meta, const IndexMeta &index_meta)
+{
+  return schema_catalog_->register_index(table_meta, index_meta);
 }
 
 Table *Db::find_table(const char *table_name) const
@@ -207,6 +245,26 @@ Table *Db::find_table(int32_t table_id) const
 
 RC Db::open_all_tables()
 {
+  vector<TableMeta> catalog_tables;
+  RC rc = schema_catalog_->load_tables(catalog_tables);
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to scan schema catalog. db=%s rc=%s", name_.c_str(), strrc(rc));
+    return rc;
+  }
+
+  for (const TableMeta &meta : catalog_tables) {
+    Table *table = new Table();
+    rc = table->open(this, meta, path_.c_str());
+    if (OB_FAIL(rc)) {
+      delete table;
+      LOG_ERROR("Failed to open catalog table metadata. table=%s rc=%s", meta.name(), strrc(rc));
+      return rc;
+    }
+    opened_tables_[table->name()] = table;
+    next_table_id_ = std::max(next_table_id_, table->table_id() + 1);
+    LOG_INFO("Open table from schema catalog: %s", table->name());
+  }
+
   vector<string> table_meta_files;
 
   int ret = list_file(path_.c_str(), TABLE_META_FILE_PATTERN, table_meta_files);
@@ -215,7 +273,6 @@ RC Db::open_all_tables()
     return RC::IOERR_READ;
   }
 
-  RC rc = RC::SUCCESS;
   for (const string &filename : table_meta_files) {
     Table *table = new Table();
     rc           = table->open(this, filename.c_str(), path_.c_str());
@@ -225,23 +282,64 @@ RC Db::open_all_tables()
       return rc;
     }
 
-    if (opened_tables_.count(table->name()) != 0) {
-      LOG_ERROR("Duplicate table with difference file name. table=%s, the other filename=%s",
-          table->name(), filename.c_str());
-      // 在这里原本先删除table后调用table->name()方法，犯了use-after-free的错误
+    if (SchemaCatalog::is_reserved_name(table->name()) || opened_tables_.count(table->name()) != 0) {
       delete table;
-      return RC::INTERNAL;
+      continue;
     }
 
     if (table->table_id() >= next_table_id_) {
       next_table_id_ = table->table_id() + 1;
     }
     opened_tables_[table->name()] = table;
-    LOG_INFO("Open table: %s, file: %s", table->name(), filename.c_str());
+    legacy_tables_to_register_.push_back(table);
+    LOG_INFO("Open and migrate legacy table: %s, file: %s", table->name(), filename.c_str());
   }
 
   LOG_INFO("All table have been opened. num=%d", opened_tables_.size());
   return rc;
+}
+
+RC Db::open_schema_catalog()
+{
+  TableMeta meta;
+  RC rc = SchemaCatalog::bootstrap_meta(meta);
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+
+  Table *table = new Table();
+  const string data_file = table_data_file(path_.c_str(), SchemaCatalog::TABLE_NAME);
+  schema_catalog_created_ = !filesystem::exists(data_file);
+  rc = schema_catalog_created_ ? table->create(this, meta, path_.c_str()) : table->open(this, meta, path_.c_str());
+  if (OB_FAIL(rc)) {
+    delete table;
+    return rc;
+  }
+
+  opened_tables_[SchemaCatalog::TABLE_NAME] = table;
+  schema_catalog_ = make_unique<SchemaCatalog>(table);
+  next_table_id_ = SchemaCatalog::TABLE_ID + 1;
+  return rc;
+}
+
+RC Db::finish_schema_catalog_bootstrap()
+{
+  RC rc = RC::SUCCESS;
+  if (schema_catalog_created_) {
+    TableMeta meta;
+    rc = SchemaCatalog::bootstrap_meta(meta);
+    if (OB_FAIL(rc) || OB_FAIL(rc = schema_catalog_->register_table(meta))) {
+      return rc;
+    }
+  }
+  for (const Table *table : legacy_tables_to_register_) {
+    rc = schema_catalog_->register_table(table->table_meta());
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+  }
+  legacy_tables_to_register_.clear();
+  return opened_tables_[SchemaCatalog::TABLE_NAME]->sync();
 }
 
 const char *Db::name() const { return name_.c_str(); }
@@ -249,6 +347,9 @@ const char *Db::name() const { return name_.c_str(); }
 void Db::all_tables(vector<string> &table_names) const
 {
   for (const auto &table_item : opened_tables_) {
+    if (SchemaCatalog::is_reserved_name(table_item.first.c_str())) {
+      continue;
+    }
     table_names.emplace_back(table_item.first);
   }
 }

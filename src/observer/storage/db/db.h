@@ -30,6 +30,9 @@ class Table;
 class LogHandler;
 class BufferPoolManager;
 class TrxKit;
+class IndexMeta;
+class SchemaCatalog;
+class TableMeta;
 
 /**
  * @brief 一个DB实例负责管理一批表
@@ -45,7 +48,7 @@ class TrxKit;
 class Db
 {
 public:
-  Db() = default;
+  Db();
   ~Db();
 
   /**
@@ -73,6 +76,8 @@ public:
    */
   RC create_table(const char *table_name, span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys,
       const StorageFormat storage_format = StorageFormat::ROW_FORMAT);
+
+  RC register_index(const TableMeta &table_meta, const IndexMeta &index_meta);
 
   /**
    * @brief 根据表名查找表
@@ -109,6 +114,8 @@ public:
   oceanbase::ObLsm *lsm() { return lsm_; }
 
 private:
+  RC open_schema_catalog();
+  RC finish_schema_catalog_bootstrap();
   /// @brief 打开所有的表。在数据库初始化的时候会执行
   RC open_all_tables();
   /// @brief 恢复数据。在数据库初始化的时候运行。
@@ -144,10 +151,14 @@ private:
   unique_ptr<BufferPoolManager>  buffer_pool_manager_;  ///< 当前数据库的buffer pool管理器
   unique_ptr<LogHandler>         log_handler_;          ///< 当前数据库的日志处理器
   unique_ptr<TrxKit>             trx_kit_;              ///< 当前数据库的事务管理器
+  unique_ptr<SchemaCatalog>      schema_catalog_;       ///< page-backed schema data dictionary
   oceanbase::ObLsm              *lsm_;                  ///< 当前数据库的 LSM-Tree 存储引擎
 
   /// 给每个table都分配一个ID，用来记录日志。这里假设所有的DDL都不会并发操作，所以相关的数据都不上锁
   int32_t next_table_id_ = 0;
+
+  bool              schema_catalog_created_ = false;
+  vector<Table *> legacy_tables_to_register_;
 
   LSN    check_point_lsn_ = 0;  ///< 当前数据库的检查点LSN。会记录到磁盘中。
   string storage_engine_;

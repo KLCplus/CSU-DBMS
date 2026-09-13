@@ -39,6 +39,9 @@ public:
       span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
       StorageEngine storage_engine);
 
+  RC init_from_catalog(int32_t table_id, const char *name, const vector<FieldMeta> &fields,
+      const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine);
+
   RC add_index(const IndexMeta &index);
 
 public:
