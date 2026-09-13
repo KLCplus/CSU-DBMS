@@ -25,6 +25,7 @@
 #include "common/linereader/line_reader.h"
 #include "common/version.h"
 #include "json/json.h"
+#include "web_console_launcher.h"
 
 using std::cerr;
 using std::cout;
@@ -439,6 +440,9 @@ const char *meta_help = R"(CSUDB shell commands:
   /buffer                    Show Buffer Pool summary
   /pages [N]                 Show at most N frame snapshots (default 20)
   /server                    Show server status
+  /web [PORT]                Open the local Web Console (default 8765)
+  /web status                Show Web Console process status
+  /web stop                  Stop the local Web Console
   /pager                     Reserved; currently unsupported
 
 Type '/' and press Tab to list commands. Partial names are completed and
@@ -448,7 +452,8 @@ mistyped commands show nearby candidates. Legacy backslash forms still work.
 const vector<string> &meta_command_names()
 {
   static const vector<string> names = {"/help", "/?", "/q", "/quit", "/exit", "/status", "/connect", "/use",
-      "/database", "/timing", "/clear", "/history", "/source", "/output", "/buffer", "/pages", "/server", "/pager"};
+      "/database", "/timing", "/clear", "/history", "/source", "/output", "/buffer", "/pages", "/server",
+      "/web", "/pager"};
   return names;
 }
 
@@ -632,6 +637,36 @@ private:
       string path; stream >> path;
       if (path.empty()) { output_file_.close(); cout << "Query output restored to stdout.\n"; }
       else { output_file_.close(); output_file_.open(path, std::ios::app); if (!output_file_) cerr << "ERROR: cannot open output file\n"; }
+      return true;
+    }
+    if (lower == "/web") {
+      string argument;
+      stream >> argument;
+      string message;
+      if (argument == "status") {
+        web_console_status(message);
+        output() << message << '\n';
+        return true;
+      }
+      if (argument == "stop") {
+        stop_web_console(message);
+        output() << message << '\n';
+        return true;
+      }
+
+      int web_port = 8765;
+      if (!argument.empty()) {
+        char *end = nullptr;
+        const long parsed = std::strtol(argument.c_str(), &end, 10);
+        if (end == argument.c_str() || *end != '\0' || parsed <= 0 || parsed > 65535) {
+          cerr << "Usage: /web [PORT|status|stop]\n";
+          return true;
+        }
+        web_port = static_cast<int>(parsed);
+      }
+      WebConsoleOptions web_options{options_.host, options_.port, web_port, true};
+      const bool started = start_web_console(web_options, message);
+      (started ? output() : cerr) << message << '\n';
       return true;
     }
     if (lower == "/pager") { cerr << "Unsupported: pager is reserved for a future release.\n"; return true; }
