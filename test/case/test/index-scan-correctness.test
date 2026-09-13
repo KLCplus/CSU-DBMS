@@ -1,0 +1,20 @@
+create table index_scan_correctness(key_col int);
+insert into index_scan_correctness values(1);
+insert into index_scan_correctness values(2);
+insert into index_scan_correctness values(3);
+insert into index_scan_correctness values(4);
+insert into index_scan_correctness values(5);
+create index idx_index_scan_key on index_scan_correctness(key_col);
+
+select key_col from index_scan_correctness where key_col = 3;
+-- sort select key_col from index_scan_correctness where key_col != 3;
+
+-- 验证范围扫描的开闭边界都不会遗漏或多取边界值 3。
+-- sort select key_col from index_scan_correctness where key_col < 3;
+-- sort select key_col from index_scan_correctness where key_col <= 3;
+-- sort select key_col from index_scan_correctness where key_col > 3;
+-- sort select key_col from index_scan_correctness where key_col >= 3;
+
+explain select key_col from index_scan_correctness where key_col = 3;
+-- 验证 != 不会被错误规划为等值 IndexScan。
+explain select key_col from index_scan_correctness where key_col != 3;

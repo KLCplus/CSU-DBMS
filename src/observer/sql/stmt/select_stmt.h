@@ -44,7 +44,7 @@ public:
 
   vector<unique_ptr<Expression>> &query_expressions() { return query_expressions_; }
   vector<unique_ptr<Expression>> &group_by() { return group_by_; }
-  vector<unique_ptr<Expression>> &order_by() { return order_by_; }
+  vector<OrderByUnit> &order_by() { return order_by_; }
   // WHERE 布尔表达式（可能为空）。规划器在构建谓词时会取走其所有权。
   unique_ptr<Expression> &where_expression() { return where_expression_; }
 
@@ -54,5 +54,5 @@ private:
   FilterStmt                    *filter_stmt_ = nullptr;
   unique_ptr<Expression>         where_expression_ = nullptr;
   vector<unique_ptr<Expression>> group_by_;
-  vector<unique_ptr<Expression>> order_by_;
+  vector<OrderByUnit>            order_by_;
 };

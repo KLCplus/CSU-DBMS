@@ -11,6 +11,7 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "sql/operator/logical_operator.h"
+#include "sql/parser/parse_defs.h"
 
 /**
  * @brief 排序逻辑算子
@@ -20,14 +21,15 @@ See the Mulan PSL v2 for more details. */
 class SortLogicalOperator : public LogicalOperator
 {
 public:
-  SortLogicalOperator(vector<unique_ptr<Expression>> &&order_by_exprs);
+  SortLogicalOperator(vector<OrderByUnit> &&order_by_units);
   virtual ~SortLogicalOperator() = default;
 
   LogicalOperatorType type() const override { return LogicalOperatorType::SORT; }
   OpType              get_op_type() const override { return OpType::LOGICALSORT; }
 
-  auto &order_by_expressions() { return order_by_expressions_; }
+  auto &order_by_units() { return order_by_units_; }
 
 private:
-  vector<unique_ptr<Expression>> order_by_expressions_;
+  // Logical Sort 保留每个表达式自己的方向，物理计划生成时整体移交所有权。
+  vector<OrderByUnit> order_by_units_;
 };
