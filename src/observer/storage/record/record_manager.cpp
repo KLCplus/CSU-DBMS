@@ -421,6 +421,8 @@ PageNum RecordPageHandler::get_page_num() const
 
 bool RecordPageHandler::is_full() const { return page_header_->record_num >= page_header_->record_capacity; }
 
+bool RecordPageHandler::is_empty() const { return page_header_->record_num == 0; }
+
 RC PaxRecordPageHandler::insert_record(const char *data, RID *rid)
 {
   // your code here
@@ -658,25 +660,38 @@ RC RecordFileHandler::delete_record(const RID *rid)
 
   unique_ptr<RecordPageHandler> record_page_handler(RecordPageHandler::create(storage_format_));
 
+  // Keep inserts from selecting this page while it is being deleted or disposed.
+  lock_.lock();
   rc = record_page_handler->init(*disk_buffer_pool_, *log_handler_, rid->page_num, ReadWriteMode::READ_WRITE);
   if (OB_FAIL(rc)) {
+    lock_.unlock();
     LOG_ERROR("Failed to init record page handler.page number=%d. rc=%s", rid->page_num, strrc(rc));
     return rc;
   }
 
   rc = record_page_handler->delete_record(rid);
-  // 📢 这里注意要清理掉资源，否则会与insert_record中的加锁顺序冲突而可能出现死锁
-  // delete record的加锁逻辑是拿到页面锁，删除指定记录，然后加上和释放record manager锁
-  // insert record是加上 record manager锁，然后拿到指定页面锁再释放record manager锁
+  const bool page_is_empty = OB_SUCC(rc) && record_page_handler->is_empty();
+
+  // dispose_page requires that no RecordPageHandler keeps the frame pinned or latched.
   record_page_handler->cleanup();
   if (OB_SUCC(rc)) {
-    // 因为这里已经释放了页面锁，并发时，其它线程可能又把该页面填满了，那就不应该再放入 free_pages_
-    // 中。但是这里可以不关心，因为在查找空闲页面时，会自动过滤掉已经满的页面
-    lock_.lock();
-    free_pages_.insert(rid->page_num);
-    LOG_TRACE("add free page %d to free page list", rid->page_num);
-    lock_.unlock();
+    if (page_is_empty) {
+      free_pages_.erase(rid->page_num);
+      const RC dispose_rc = disk_buffer_pool_->dispose_page(rid->page_num);
+      if (OB_FAIL(dispose_rc)) {
+        // The record deletion succeeded, but an outstanding page user made disposal unsafe.
+        // Keep the allocated empty page reusable instead of leaving Record Manager state stale.
+        free_pages_.insert(rid->page_num);
+        LOG_WARN("failed to dispose empty record page %d. rc=%s", rid->page_num, strrc(dispose_rc));
+      } else {
+        LOG_TRACE("disposed empty record page %d", rid->page_num);
+      }
+    } else {
+      free_pages_.insert(rid->page_num);
+      LOG_TRACE("add free page %d to free page list", rid->page_num);
+    }
   }
+  lock_.unlock();
   return rc;
 }
 

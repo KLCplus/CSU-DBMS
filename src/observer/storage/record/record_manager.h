@@ -232,6 +232,11 @@ public:
    */
   bool is_full() const;
 
+  /**
+   * @brief 当前页面是否已经没有有效记录
+   */
+  bool is_empty() const;
+
 protected:
   /**
    * @details
