@@ -1,0 +1,46 @@
+create table update_correctness(id int, name char(8), age int);
+SUCCESS
+insert into update_correctness values(1, 'Ann', 10);
+SUCCESS
+insert into update_correctness values(2, 'Ben', 10);
+SUCCESS
+insert into update_correctness values(3, 'Cat', 20);
+SUCCESS
+insert into update_correctness values(4, 'Dan', 20);
+SUCCESS
+create index idx_update_age on update_correctness(age);
+SUCCESS
+update update_correctness set name='Bob' where id=2;
+SUCCESS
+select id, name, age from update_correctness order by id;
+1 | Ann | 10
+2 | Bob | 10
+3 | Cat | 20
+4 | Dan | 20
+ID | NAME | AGE
+update update_correctness set name='Senior' where age>=20;
+SUCCESS
+select id, name, age from update_correctness order by id;
+1 | Ann | 10
+2 | Bob | 10
+3 | Senior | 20
+4 | Senior | 20
+ID | NAME | AGE
+update update_correctness set age=30 where id=2;
+SUCCESS
+select id, name, age from update_correctness where age=10 order by id;
+1 | Ann | 10
+ID | NAME | AGE
+select id, name, age from update_correctness where age=30 order by id;
+2 | Bob | 30
+ID | NAME | AGE
+explain select id from update_correctness where age=10;
+QUERY PLAN
+OPERATOR(NAME)
+PROJECT
+└─INDEX_SCAN(idx_update_age ON update_correctness)
+explain select id from update_correctness where age=30;
+QUERY PLAN
+OPERATOR(NAME)
+PROJECT
+└─INDEX_SCAN(idx_update_age ON update_correctness)

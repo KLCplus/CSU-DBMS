@@ -100,6 +100,22 @@ struct JoinSqlNode
   unique_ptr<Expression> condition;      ///< ON 条件
 };
 
+enum class OrderDirection
+{
+  ASC,
+  DESC
+};
+
+/**
+ * @brief ORDER BY 的单个排序项
+ * @details 每个排序表达式必须独立携带方向，才能正确表达多键混合升降序。
+ */
+struct OrderByUnit
+{
+  unique_ptr<Expression> expression;
+  OrderDirection         direction = OrderDirection::ASC;
+};
+
 struct SelectSqlNode
 {
   vector<unique_ptr<Expression>> expressions;  ///< 查询的表达式
@@ -107,7 +123,7 @@ struct SelectSqlNode
   vector<ConditionSqlNode>       conditions;   ///< 查询条件，使用AND串联起来多个条件
   unique_ptr<Expression>         where_expression;  ///< WHERE 布尔表达式（支持 AND/OR/NOT/括号/算术）
   vector<unique_ptr<Expression>> group_by;     ///< group by clause
-  vector<unique_ptr<Expression>> order_by;     ///< order by clause
+  vector<OrderByUnit>            order_by;     ///< order by clause
   vector<JoinSqlNode>            joins;        ///< 显式 JOIN 子句
 };
 

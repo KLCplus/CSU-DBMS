@@ -58,6 +58,8 @@ private:
 
   Value left_value_;
   Value right_value_;
+  bool  has_left_value_  = false;
+  bool  has_right_value_ = false;
   bool  left_inclusive_  = false;
   bool  right_inclusive_ = false;
 

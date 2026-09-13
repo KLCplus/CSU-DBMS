@@ -17,8 +17,8 @@ See the Mulan PSL v2 for more details. */
 using namespace std;
 using namespace common;
 
-SortPhysicalOperator::SortPhysicalOperator(vector<unique_ptr<Expression>> &&order_by_exprs)
-    : order_by_exprs_(std::move(order_by_exprs))
+SortPhysicalOperator::SortPhysicalOperator(vector<OrderByUnit> &&order_by_units)
+    : order_by_units_(std::move(order_by_units))
 {}
 
 string SortPhysicalOperator::param() const
@@ -71,7 +71,7 @@ RC SortPhysicalOperator::open(Trx *trx)
     return rc;
   }
 
-  // 对整个结果按排序键升序排序（稳定排序）
+  // 对整个结果按各排序键指定的方向执行稳定排序。
   sorted_order_.resize(keys_.size());
   for (size_t i = 0; i < sorted_order_.size(); i++) {
     sorted_order_[i] = i;
@@ -83,7 +83,10 @@ RC SortPhysicalOperator::open(Trx *trx)
     for (size_t i = 0; i < key_a.size(); i++) {
       int cmp = key_a[i].compare(key_b[i]);
       if (cmp != 0) {
-        return cmp < 0;
+        // ORDER BY 的方向属于每个排序键，而不是整个结果集；当前键不等时立即按
+        // 该键的 ASC/DESC 决定顺序，只有相等时才继续比较下一个键。
+        // 不能统一 reverse，因为多列 ORDER BY 的每个键可以具有不同方向。
+        return order_by_units_[i].direction == OrderDirection::ASC ? cmp < 0 : cmp > 0;
       }
     }
     return false;
@@ -124,9 +127,9 @@ RC SortPhysicalOperator::close()
 
 RC SortPhysicalOperator::evaluate_order_by(const Tuple &tuple, vector<Value> &keys)
 {
-  for (auto &expr : order_by_exprs_) {
+  for (auto &order_by_unit : order_by_units_) {
     Value value;
-    RC    rc = expr->get_value(tuple, value);
+    RC    rc = order_by_unit.expression->get_value(tuple, value);
     if (OB_FAIL(rc)) {
       LOG_WARN("failed to get sort key value. rc=%s", strrc(rc));
       return rc;

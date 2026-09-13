@@ -16,6 +16,6 @@ See the Mulan PSL v2 for more details. */
 
 using namespace std;
 
-SortLogicalOperator::SortLogicalOperator(vector<unique_ptr<Expression>> &&order_by_exprs)
-    : order_by_expressions_(std::move(order_by_exprs))
+SortLogicalOperator::SortLogicalOperator(vector<OrderByUnit> &&order_by_units)
+    : order_by_units_(std::move(order_by_units))
 {}

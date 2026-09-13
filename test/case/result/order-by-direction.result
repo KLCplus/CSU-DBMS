@@ -1,0 +1,70 @@
+create table order_direction_test(id int, score int, group_id int);
+SUCCESS
+insert into order_direction_test values(1, 30, 2);
+SUCCESS
+insert into order_direction_test values(2, 10, 1);
+SUCCESS
+insert into order_direction_test values(3, 20, 1);
+SUCCESS
+insert into order_direction_test values(4, 20, 2);
+SUCCESS
+insert into order_direction_test values(5, 10, 2);
+SUCCESS
+select id, score from order_direction_test order by score;
+2 | 10
+5 | 10
+3 | 20
+4 | 20
+1 | 30
+ID | SCORE
+select id, score from order_direction_test order by score asc;
+2 | 10
+5 | 10
+3 | 20
+4 | 20
+1 | 30
+ID | SCORE
+select id, score from order_direction_test order by score desc;
+1 | 30
+3 | 20
+4 | 20
+2 | 10
+5 | 10
+ID | SCORE
+select id, score from order_direction_test order by score asc, id asc;
+2 | 10
+5 | 10
+3 | 20
+4 | 20
+1 | 30
+ID | SCORE
+select id, score from order_direction_test order by score asc, id desc;
+5 | 10
+2 | 10
+4 | 20
+3 | 20
+1 | 30
+ID | SCORE
+select id, score from order_direction_test order by score desc, id asc;
+1 | 30
+3 | 20
+4 | 20
+2 | 10
+5 | 10
+ID | SCORE
+select id, score from order_direction_test where group_id=2 order by score desc, id asc;
+1 | 30
+4 | 20
+5 | 10
+ID | SCORE
+desc order_direction_test;
+id | ints | 4
+score | ints | 4
+group_id | ints | 4
+Field | Type | Length
+explain select id, score from order_direction_test order by score desc;
+QUERY PLAN
+OPERATOR(NAME)
+PROJECT
+└─SORT
+  └─TABLE_SCAN(order_direction_test)

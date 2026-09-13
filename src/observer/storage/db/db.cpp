@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/db/db.h"
 
 #include <fcntl.h>
+#include <fstream>
 #include <sys/stat.h>
 
 #include "common/lang/string.h"
@@ -274,17 +275,31 @@ RC Db::open_all_tables()
   }
 
   for (const string &filename : table_meta_files) {
+    const string meta_file_path = path_ + common::FILE_PATH_SPLIT_STR + filename;
+    fstream      fs(meta_file_path, ios_base::in | ios_base::binary);
+    if (!fs.is_open()) {
+      LOG_ERROR("Failed to open legacy table meta file. file=%s", meta_file_path.c_str());
+      return RC::IOERR_OPEN;
+    }
+
+    TableMeta legacy_meta;
+    if (legacy_meta.deserialize(fs) < 0) {
+      LOG_ERROR("Failed to deserialize legacy table meta. file=%s", meta_file_path.c_str());
+      return RC::INTERNAL;
+    }
+
+    // Catalog 是当前元数据的权威来源。若同名表已从 Catalog 恢复，
+    // 残留的 legacy .table 仅用于兼容，不能再次打开底层数据与索引。
+    if (SchemaCatalog::is_reserved_name(legacy_meta.name()) || opened_tables_.count(legacy_meta.name()) != 0) {
+      continue;
+    }
+
     Table *table = new Table();
-    rc           = table->open(this, filename.c_str(), path_.c_str());
+    rc           = table->open(this, legacy_meta, path_.c_str());
     if (rc != RC::SUCCESS) {
       delete table;
       LOG_ERROR("Failed to open table. filename=%s", filename.c_str());
       return rc;
-    }
-
-    if (SchemaCatalog::is_reserved_name(table->name()) || opened_tables_.count(table->name()) != 0) {
-      delete table;
-      continue;
     }
 
     if (table->table_id() >= next_table_id_) {

@@ -1,0 +1,20 @@
+create table update_correctness(id int, name char(8), age int);
+insert into update_correctness values(1, 'Ann', 10);
+insert into update_correctness values(2, 'Ben', 10);
+insert into update_correctness values(3, 'Cat', 20);
+insert into update_correctness values(4, 'Dan', 20);
+create index idx_update_age on update_correctness(age);
+
+update update_correctness set name='Bob' where id=2;
+select id, name, age from update_correctness order by id;
+
+-- 验证 UPDATE 会持续消费 child，更新全部匹配行。
+update update_correctness set name='Senior' where age>=20;
+select id, name, age from update_correctness order by id;
+
+-- 修改索引字段后，旧 key 不应再命中该 RID，新 key 必须能够命中。
+update update_correctness set age=30 where id=2;
+select id, name, age from update_correctness where age=10 order by id;
+select id, name, age from update_correctness where age=30 order by id;
+explain select id from update_correctness where age=10;
+explain select id from update_correctness where age=30;
