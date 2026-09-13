@@ -122,6 +122,7 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
         INDEX
         CALC
         SELECT
+        ASC
         DESC
         SHOW
         SYNC
@@ -183,6 +184,8 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
   AttrInfoSqlNode *                          attr_info;
   Expression *                               expression;
   vector<unique_ptr<Expression>> *           expression_list;
+  OrderByUnit *                              order_by_unit;
+  vector<OrderByUnit> *                      order_by_list;
   vector<Value> *                            value_list;
   vector<ConditionSqlNode> *                 condition_list;
   vector<RelAttrSqlNode> *                   rel_attr_list;
@@ -200,6 +203,8 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
 %destructor { delete $$; } <attr_infos>
 %destructor { delete $$; } <expression>
 %destructor { delete $$; } <expression_list>
+%destructor { delete $$; } <order_by_unit>
+%destructor { delete $$; } <order_by_list>
 %destructor { delete $$; } <value_list>
 %destructor { delete $$; } <condition_list>
 // %destructor { delete $$; } <rel_attr_list>
@@ -239,7 +244,9 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
 %type <expression>          select_where
 %type <expression_list>     expression_list
 %type <expression_list>     group_by
-%type <expression_list>     order_by
+%type <order_by_unit>       order_by_unit
+%type <order_by_list>       order_by_list
+%type <order_by_list>       order_by
 %type <cstring>             fields_terminated_by
 %type <cstring>             enclosed_by
 %type <sql_node>            calc_stmt
@@ -874,9 +881,44 @@ order_by:
     {
       $$ = nullptr;
     }
-    | ORDER BY expression_list
+    | ORDER BY order_by_list
     {
       $$ = $3;
+    }
+    ;
+order_by_unit:
+    expression
+    {
+      // 未显式指定方向时遵循 SQL 默认语义：按 ASC 排序。
+      $$ = new OrderByUnit;
+      $$->expression.reset($1);
+      $$->direction = OrderDirection::ASC;
+    }
+    | expression ASC
+    {
+      $$ = new OrderByUnit;
+      $$->expression.reset($1);
+      $$->direction = OrderDirection::ASC;
+    }
+    | expression DESC
+    {
+      $$ = new OrderByUnit;
+      $$->expression.reset($1);
+      $$->direction = OrderDirection::DESC;
+    }
+    ;
+order_by_list:
+    order_by_unit
+    {
+      $$ = new vector<OrderByUnit>;
+      $$->emplace_back(std::move(*$1));
+      delete $1;
+    }
+    | order_by_list COMMA order_by_unit
+    {
+      $$ = $1;
+      $$->emplace_back(std::move(*$3));
+      delete $3;
     }
     ;
 load_data_stmt:

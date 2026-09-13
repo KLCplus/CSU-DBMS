@@ -1,0 +1,52 @@
+create table index_scan_correctness(key_col int);
+SUCCESS
+insert into index_scan_correctness values(1);
+SUCCESS
+insert into index_scan_correctness values(2);
+SUCCESS
+insert into index_scan_correctness values(3);
+SUCCESS
+insert into index_scan_correctness values(4);
+SUCCESS
+insert into index_scan_correctness values(5);
+SUCCESS
+create index idx_index_scan_key on index_scan_correctness(key_col);
+SUCCESS
+select key_col from index_scan_correctness where key_col = 3;
+3
+KEY_COL
+select key_col from index_scan_correctness where key_col != 3;
+1
+2
+4
+5
+KEY_COL
+select key_col from index_scan_correctness where key_col < 3;
+1
+2
+KEY_COL
+select key_col from index_scan_correctness where key_col <= 3;
+1
+2
+3
+KEY_COL
+select key_col from index_scan_correctness where key_col > 3;
+4
+5
+KEY_COL
+select key_col from index_scan_correctness where key_col >= 3;
+3
+4
+5
+KEY_COL
+explain select key_col from index_scan_correctness where key_col = 3;
+QUERY PLAN
+OPERATOR(NAME)
+PROJECT
+└─INDEX_SCAN(idx_index_scan_key ON index_scan_correctness)
+
+explain select key_col from index_scan_correctness where key_col != 3;
+QUERY PLAN
+OPERATOR(NAME)
+PROJECT
+└─TABLE_SCAN(index_scan_correctness)

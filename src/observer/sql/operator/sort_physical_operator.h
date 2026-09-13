@@ -11,18 +11,19 @@ See the Mulan PSL v2 for more details. */
 #pragma once
 
 #include "sql/operator/physical_operator.h"
+#include "sql/parser/parse_defs.h"
 #include "common/value.h"
 
 /**
  * @brief 排序物理算子
  * @ingroup PhysicalOperator
  * @details 一次性从子算子取出所有元组，计算 ORDER BY 表达式的值作为排序键，
- * 升序排列后再逐条输出。实现为内存排序（未做外排，适用于课程场景的数据量）。
+ * 按每个排序项指定的方向排列后再逐条输出。实现为内存排序（未做外排，适用于课程场景的数据量）。
  */
 class SortPhysicalOperator : public PhysicalOperator
 {
 public:
-  SortPhysicalOperator(vector<unique_ptr<Expression>> &&order_by_exprs);
+  SortPhysicalOperator(vector<OrderByUnit> &&order_by_units);
   virtual ~SortPhysicalOperator() = default;
 
   PhysicalOperatorType type() const override { return PhysicalOperatorType::SORT; }
@@ -39,7 +40,7 @@ public:
 private:
   RC evaluate_order_by(const Tuple &tuple, vector<Value> &keys);
 
-  vector<unique_ptr<Expression>> order_by_exprs_;
+  vector<OrderByUnit> order_by_units_;
 
   vector<unique_ptr<ValueListTuple>> buffered_rows_;  ///< 缓冲的所有行（值的深拷贝）
   vector<vector<Value>>              keys_;           ///< 每行的排序键
