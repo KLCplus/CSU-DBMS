@@ -212,6 +212,70 @@ TEST(RecordScanner, test_record_file_iterator)
   delete bpm;
 }
 
+TEST(RecordManager, reclaim_empty_page)
+{
+  const filesystem::path record_manager_file = "record_manager_reclaim.bp";
+  filesystem::remove(record_manager_file);
+
+  VacuousLogHandler log_handler;
+  BufferPoolManager bpm;
+  ASSERT_EQ(RC::SUCCESS, bpm.init(make_unique<VacuousDoubleWriteBuffer>()));
+  ASSERT_EQ(RC::SUCCESS, bpm.create_file(record_manager_file.c_str()));
+
+  DiskBufferPool *buffer_pool = nullptr;
+  ASSERT_EQ(RC::SUCCESS, bpm.open_file(log_handler, record_manager_file.c_str(), buffer_pool));
+  ASSERT_NE(nullptr, buffer_pool);
+
+  constexpr int record_size = 32;
+  char          first_data[record_size] = "first";
+  char          second_data[record_size] = "after reclaim";
+  RID           first_rid;
+  RID           second_rid;
+
+  RecordFileHandler record_file_handler(StorageFormat::ROW_FORMAT);
+  ASSERT_EQ(RC::SUCCESS, record_file_handler.init(*buffer_pool, log_handler, nullptr, nullptr));
+  ASSERT_EQ(RC::SUCCESS, record_file_handler.insert_record(first_data, record_size, &first_rid));
+  ASSERT_EQ(RC::SUCCESS, record_file_handler.delete_record(&first_rid));
+
+  BufferPoolIterator page_iterator;
+  ASSERT_EQ(RC::SUCCESS, page_iterator.init(*buffer_pool, 1));
+  ASSERT_FALSE(page_iterator.has_next());
+
+  VacuousTrx trx;
+  {
+    HeapRecordScanner scanner(
+        nullptr, *buffer_pool, &trx, log_handler, ReadWriteMode::READ_ONLY, nullptr);
+    ASSERT_EQ(RC::SUCCESS, scanner.open_scan());
+    Record record;
+    ASSERT_EQ(RC::RECORD_EOF, scanner.next(record));
+    ASSERT_EQ(RC::SUCCESS, scanner.close_scan());
+  }
+
+  ASSERT_EQ(RC::SUCCESS, record_file_handler.insert_record(second_data, record_size, &second_rid));
+  ASSERT_EQ(first_rid.page_num, second_rid.page_num);
+  ASSERT_EQ(RC::SUCCESS, buffer_pool->flush_all_pages());
+  record_file_handler.close();
+  ASSERT_EQ(RC::SUCCESS, bpm.close_file(record_manager_file.c_str()));
+
+  buffer_pool = nullptr;
+  ASSERT_EQ(RC::SUCCESS, bpm.open_file(log_handler, record_manager_file.c_str(), buffer_pool));
+  ASSERT_NE(nullptr, buffer_pool);
+
+  RecordFileHandler reopened_handler(StorageFormat::ROW_FORMAT);
+  ASSERT_EQ(RC::SUCCESS, reopened_handler.init(*buffer_pool, log_handler, nullptr, nullptr));
+  HeapRecordScanner scanner(nullptr, *buffer_pool, &trx, log_handler, ReadWriteMode::READ_ONLY, nullptr);
+  ASSERT_EQ(RC::SUCCESS, scanner.open_scan());
+  Record record;
+  ASSERT_EQ(RC::SUCCESS, scanner.next(record));
+  ASSERT_EQ(0, memcmp(second_data, record.data(), record_size));
+  ASSERT_EQ(RC::RECORD_EOF, scanner.next(record));
+  ASSERT_EQ(RC::SUCCESS, scanner.close_scan());
+
+  reopened_handler.close();
+  ASSERT_EQ(RC::SUCCESS, bpm.close_file(record_manager_file.c_str()));
+  filesystem::remove(record_manager_file);
+}
+
 TEST(RecordManager, durability)
 {
   /*
