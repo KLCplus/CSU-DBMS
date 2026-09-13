@@ -180,7 +180,12 @@ FIND_PACKAGE(replxx REQUIRED)
 ADD_SUBDIRECTORY(src)
 ADD_SUBDIRECTORY(tools)
 
-INSTALL(DIRECTORY docs/product DESTINATION share/csudb/docs)
+IF(EXISTS "${PROJECT_SOURCE_DIR}/docs/product")
+    INSTALL(DIRECTORY docs/product DESTINATION share/csudb/docs)
+ENDIF()
+INSTALL(FILES src/obclient/README.md DESTINATION share/csudb/docs OPTIONAL)
+INSTALL(FILES src/observer/storage/os/README.md
+    src/observer/storage/os/os_source_guide.md DESTINATION share/csudb/docs/os OPTIONAL)
 INSTALL(FILES etc/csudb.ini etc/csudb-client.toml DESTINATION share/csudb/examples)
 INSTALL(FILES scripts/completion/csudb.bash DESTINATION share/bash-completion/completions RENAME csudb)
 

@@ -18,7 +18,15 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 ./build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
 ```
 
-第一次使用请直接阅读 `docs/product/USER_GUIDE.md`。客户端完整命令见 `docs/product/COMMANDS.md`，现有/新增能力审计见 `docs/product/COMMAND_AUDIT.md`。
+第一次使用请阅读 `src/obclient/README.md`。目前有三个产品入口：
+
+- `csudb`：带多行 SQL、表格输出、状态诊断和智能补全的终端客户端；
+- `/web`：从 CLI 启动只监听本机的可视化控制台；
+- `sdk/python/csudb.py`：面向开发者的 Python DB-API 风格接口。
+
+三者都复用 Native 协议与 `DatabaseService`。已有 MySQL communicator 保留为
+Experimental Compatibility Layer，可用于 Connector/J 兼容实验，但不宣称完整
+MySQL/JDBC 兼容。
 
 > Baseline 原则：稳定性 > 可读性 > 精简程度。本次没有重写 Parser、Executor、Storage、Buffer Pool、B+Tree、Transaction 或日志实现。
 
@@ -42,7 +50,7 @@ SQL
   -> Disk / File
 ```
 
-SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本在稳定基座上提供 LRU/FIFO/CLOCK、legacy/positional Page I/O、Buffer Pool 快照与统计、Page Lifecycle Trace 和安全脏页刷新；不实现 GUI、后台 cleaner、新 MVCC 或新 WAL。
+SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓冲池、日志与文件 I/O 对应数据库存储及操作系统。当前版本在稳定基座上提供 LRU/FIFO/CLOCK、legacy/positional Page I/O、Buffer Pool 快照与统计、Page Lifecycle Trace 和安全脏页刷新；产品层另提供本地 Web Console，但不实现后台 cleaner、新 MVCC 或新 WAL。
 
 ## 2. 当前基座保留的功能
 

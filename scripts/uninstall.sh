@@ -18,7 +18,11 @@ esac
 
 rm -f "${PREFIX}/bin/csudb" "${PREFIX}/bin/csudbd"
 rm -f "${PREFIX}/share/bash-completion/completions/csudb"
+rm -rf "${PREFIX}/libexec/csudb"
+rm -rf "${PREFIX}/share/csudb/sdk"
 rm -rf "${PREFIX}/share/csudb/docs/product" "${PREFIX}/share/csudb/examples"
+rm -rf "${PREFIX}/share/csudb/docs/os"
+rm -f "${PREFIX}/share/csudb/docs/README.md"
 rmdir "${PREFIX}/share/csudb/docs" "${PREFIX}/share/csudb" 2>/dev/null || true
 
 echo "CSUDB programs and support files were removed from ${PREFIX}."

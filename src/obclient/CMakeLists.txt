@@ -26,3 +26,15 @@ TARGET_LINK_LIBRARIES(csudb_client common pthread dl JsonCpp::JsonCpp)
 # TARGETS和PROGRAMS 的默认权限是OWNER_EXECUTE, GROUP_EXECUTE, 和WORLD_EXECUTE，即755权限， programs 都是处理脚步类
 # 类型分为RUNTIME／LIBRARY／ARCHIVE, prog
 INSTALL(TARGETS csudb RUNTIME DESTINATION bin)
+
+# Copies in build/bin make /web work from a development build; libexec is used
+# after cmake --install. Both helpers use only the Python standard library.
+CONFIGURE_FILE(web/csudb_web.py ${PROJECT_BINARY_DIR}/bin/csudb-web.py COPYONLY)
+CONFIGURE_FILE(web/index.html ${PROJECT_BINARY_DIR}/bin/index.html COPYONLY)
+CONFIGURE_FILE(${PROJECT_SOURCE_DIR}/sdk/python/csudb.py ${PROJECT_BINARY_DIR}/bin/csudb.py COPYONLY)
+INSTALL(PROGRAMS web/csudb_web.py DESTINATION libexec/csudb RENAME csudb-web)
+INSTALL(FILES web/index.html ${PROJECT_SOURCE_DIR}/sdk/python/csudb.py DESTINATION libexec/csudb)
+INSTALL(FILES ${PROJECT_SOURCE_DIR}/sdk/python/csudb.py
+    ${PROJECT_SOURCE_DIR}/sdk/python/__init__.py
+    ${PROJECT_SOURCE_DIR}/sdk/python/README.md
+    DESTINATION share/csudb/sdk/python)

@@ -379,6 +379,22 @@ QueryResult DatabaseService::server_info(Session &session, bool include_frames, 
   result.attributes.push_back({"requests", std::to_string(snapshot.stats.page_requests)});
   result.attributes.push_back({"hits", std::to_string(snapshot.stats.cache_hits)});
   result.attributes.push_back({"misses", std::to_string(snapshot.stats.cache_misses)});
+  result.attributes.push_back({"disk_reads", std::to_string(snapshot.stats.disk_reads)});
+  result.attributes.push_back({"disk_writes", std::to_string(snapshot.stats.disk_writes)});
+  result.attributes.push_back({"bytes_read", std::to_string(snapshot.stats.bytes_read)});
+  result.attributes.push_back({"bytes_written", std::to_string(snapshot.stats.bytes_written)});
+  result.attributes.push_back({"evictions", std::to_string(snapshot.stats.evictions)});
+  result.attributes.push_back({"dirty_evictions", std::to_string(snapshot.stats.dirty_evictions)});
+  result.attributes.push_back({"flushes", std::to_string(snapshot.stats.flushes)});
+  result.attributes.push_back({"allocations", std::to_string(snapshot.stats.page_allocations)});
+  result.attributes.push_back({"disposals", std::to_string(snapshot.stats.page_disposals)});
+  result.attributes.push_back({"pin_requests", std::to_string(snapshot.stats.pin_requests)});
+  result.attributes.push_back({"unpin_requests", std::to_string(snapshot.stats.unpin_requests)});
+  result.attributes.push_back({"no_buffer_failures", std::to_string(snapshot.stats.no_buffer_failures)});
+  result.attributes.push_back({"peak_pinned_frames", std::to_string(snapshot.stats.peak_pinned_frames)});
+  result.attributes.push_back({"peak_dirty_pages", std::to_string(snapshot.stats.peak_dirty_pages)});
+  result.attributes.push_back({"read_latency_ns_total", std::to_string(snapshot.stats.read_latency_ns_total)});
+  result.attributes.push_back({"write_latency_ns_total", std::to_string(snapshot.stats.write_latency_ns_total)});
   double hit_rate = snapshot.stats.page_requests == 0 ? 0.0 :
       100.0 * static_cast<double>(snapshot.stats.cache_hits) / snapshot.stats.page_requests;
   std::ostringstream hit_rate_text;
