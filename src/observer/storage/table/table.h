@@ -62,12 +62,16 @@ public:
       span<const AttrInfoSqlNode> attributes, const vector<string> &primary_keys, StorageFormat storage_format,
       StorageEngine storage_engine);
 
+  RC create(Db *db, const TableMeta &table_meta, const char *base_dir);
+
   /**
    * 打开一个表
    * @param meta_file 保存表元数据的文件完整路径
    * @param base_dir 表所在的文件夹，表记录数据文件、索引数据文件存放位置
    */
   RC open(Db *db, const char *meta_file, const char *base_dir);
+
+  RC open(Db *db, const TableMeta &table_meta, const char *base_dir);
 
   /**
    * @brief 根据给定的字段生成一个记录/行
@@ -122,6 +126,7 @@ public:
   RC sync();
 
 private:
+  RC open_engine();
   RC set_value_to_record(char *record_data, const Value &value, const FieldMeta *field, int field_index);
 
 private:
