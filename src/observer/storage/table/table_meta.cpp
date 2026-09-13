@@ -31,8 +31,10 @@ static const Json::StaticString FIELD_PRIMARY_KEYS("primary_keys");
 TableMeta::TableMeta(const TableMeta &other)
     : table_id_(other.table_id_),
       name_(other.name_),
+      trx_fields_(other.trx_fields_),
       fields_(other.fields_),
       indexes_(other.indexes_),
+      primary_keys_(other.primary_keys_),
       storage_format_(other.storage_format_),
       storage_engine_(other.storage_engine_),
       record_size_(other.record_size_),
@@ -41,9 +43,14 @@ TableMeta::TableMeta(const TableMeta &other)
 
 void TableMeta::swap(TableMeta &other) noexcept
 {
+  std::swap(table_id_, other.table_id_);
   name_.swap(other.name_);
+  trx_fields_.swap(other.trx_fields_);
   fields_.swap(other.fields_);
   indexes_.swap(other.indexes_);
+  primary_keys_.swap(other.primary_keys_);
+  std::swap(storage_format_, other.storage_format_);
+  std::swap(storage_engine_, other.storage_engine_);
   std::swap(record_size_, other.record_size_);
   std::swap(null_bitmap_offset_, other.null_bitmap_offset_);
 }
@@ -105,6 +112,34 @@ RC TableMeta::init(int32_t table_id, const char *name, const vector<FieldMeta> *
   storage_format_ = storage_format;
   storage_engine_ = storage_engine;
   LOG_INFO("Sussessfully initialized table meta. table id=%d, name=%s", table_id, name);
+  return RC::SUCCESS;
+}
+
+RC TableMeta::init_from_catalog(int32_t table_id, const char *name, const vector<FieldMeta> &fields,
+    const vector<string> &primary_keys, StorageFormat storage_format, StorageEngine storage_engine)
+{
+  if (table_id < 0 || common::is_blank(name) || fields.empty()) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  table_id_       = table_id;
+  name_           = name;
+  fields_         = fields;
+  primary_keys_   = primary_keys;
+  storage_format_ = storage_format;
+  storage_engine_ = storage_engine;
+  indexes_.clear();
+  trx_fields_.clear();
+
+  int data_end = 0;
+  for (const FieldMeta &field : fields_) {
+    data_end = std::max(data_end, field.offset() + field.len());
+    if (!field.visible()) {
+      trx_fields_.push_back(field);
+    }
+  }
+  null_bitmap_offset_ = data_end;
+  record_size_        = data_end + null_bitmap_size();
   return RC::SUCCESS;
 }
 

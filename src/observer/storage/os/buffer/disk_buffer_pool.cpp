@@ -540,7 +540,13 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
   scoped_lock lock_guard(lock_);
   Frame           *used_frame = frame_manager_.get(id(), page_num);
   if (used_frame != nullptr) {
-    ASSERT("the page try to dispose is in use. frame:%s", used_frame->to_string().c_str());
+    // frame_manager_.get adds one temporary pin. More than one means a scanner or
+    // another page user still owns the frame, so disposing it would leave a dangling handler.
+    if (used_frame->pin_count() != 1) {
+      LOG_WARN("cannot dispose pinned page. frame=%s", used_frame->to_string().c_str());
+      unpin_page(used_frame);
+      return RC::LOCKED_UNLOCK;
+    }
     frame_manager_.free(id(), page_num, used_frame);
   } else {
     LOG_DEBUG("page not found in memory while disposing it. pageNum=%d", page_num);

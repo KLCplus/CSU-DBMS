@@ -125,6 +125,21 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
   return rc;
 }
 
+RC Table::create(Db *db, const TableMeta &table_meta, const char *base_dir)
+{
+  db_         = db;
+  table_meta_ = table_meta;
+
+  string             data_file = table_data_file(base_dir, table_meta_.name());
+  BufferPoolManager &bpm       = db_->buffer_pool_manager();
+  RC                 rc        = bpm.create_file(data_file.c_str());
+  if (OB_FAIL(rc)) {
+    LOG_ERROR("Failed to create catalog-backed table data file. file=%s, rc=%s", data_file.c_str(), strrc(rc));
+    return rc;
+  }
+  return open_engine();
+}
+
 RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 {
   // 加载元数据文件
@@ -170,6 +185,26 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
   }
 
   return rc;
+}
+
+RC Table::open(Db *db, const TableMeta &table_meta, const char *base_dir)
+{
+  db_         = db;
+  table_meta_ = table_meta;
+  return open_engine();
+}
+
+RC Table::open_engine()
+{
+  if (table_meta_.storage_engine() == StorageEngine::HEAP) {
+    engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
+  } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
+    engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
+  } else {
+    LOG_ERROR("Unsupported storage engine type: %d", table_meta_.storage_engine());
+    return RC::UNSUPPORTED;
+  }
+  return engine_->open();
 }
 
 RC Table::insert_record(Record &record)
@@ -293,7 +328,15 @@ RC Table::get_chunk_scanner(ChunkFileScanner &scanner, Trx *trx, ReadWriteMode m
 
 RC Table::create_index(Trx *trx, const FieldMeta *field_meta, const char *index_name)
 {
-  return engine_->create_index(trx, field_meta, index_name);
+  RC rc = engine_->create_index(trx, field_meta, index_name);
+  if (OB_FAIL(rc)) {
+    return rc;
+  }
+  const IndexMeta *index_meta = table_meta_.index(index_name);
+  if (index_meta == nullptr) {
+    return RC::INTERNAL;
+  }
+  return db_->register_index(table_meta_, *index_meta);
 }
 
 RC Table::delete_record(const Record &record)
