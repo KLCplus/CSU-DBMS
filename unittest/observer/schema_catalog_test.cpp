@@ -60,7 +60,7 @@ RC run_sql(TestCommunicator &communicator, const string &sql, vector<string> *ro
 }
 }  // namespace
 
-TEST(SchemaCatalog, bootstrap_create_and_restart_without_legacy_meta)
+TEST(SchemaCatalog, bootstrap_create_and_restart_with_and_without_legacy_meta)
 {
   const filesystem::path directory("schema_catalog_test_db");
   filesystem::remove_all(directory);
@@ -97,6 +97,17 @@ TEST(SchemaCatalog, bootstrap_create_and_restart_without_legacy_meta)
     ASSERT_EQ(RC::SUCCESS, users->make_record(2, values, record));
     ASSERT_EQ(RC::SUCCESS, users->insert_record(record));
     ASSERT_EQ(RC::SUCCESS, db->sync());
+  }
+
+  // Catalog 与 legacy .table 共存时，同一用户表只能恢复一次。
+  {
+    auto db = make_unique<Db>();
+    ASSERT_EQ(RC::SUCCESS, db->init("catalog_test", directory.c_str(), "vacuous", "disk"));
+    vector<string> user_tables;
+    db->all_tables(user_tables);
+    ASSERT_EQ(1, user_tables.size());
+    EXPECT_EQ("users", user_tables[0]);
+    ASSERT_NE(nullptr, db->find_table("users"));
   }
 
   // Prove that the ordinary table can now be reconstructed from catalog pages.

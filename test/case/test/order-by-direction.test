@@ -1,0 +1,19 @@
+create table order_direction_test(id int, score int, group_id int);
+insert into order_direction_test values(1, 30, 2);
+insert into order_direction_test values(2, 10, 1);
+insert into order_direction_test values(3, 20, 1);
+insert into order_direction_test values(4, 20, 2);
+insert into order_direction_test values(5, 10, 2);
+
+select id, score from order_direction_test order by score;
+select id, score from order_direction_test order by score asc;
+select id, score from order_direction_test order by score desc;
+
+-- 多键排序必须逐键应用各自方向，下面两组结果不能通过整体 reverse 得到。
+select id, score from order_direction_test order by score asc, id asc;
+select id, score from order_direction_test order by score asc, id desc;
+select id, score from order_direction_test order by score desc, id asc;
+
+select id, score from order_direction_test where group_id=2 order by score desc, id asc;
+desc order_direction_test;
+explain select id, score from order_direction_test order by score desc;

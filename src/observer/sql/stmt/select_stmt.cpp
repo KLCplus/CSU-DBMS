@@ -101,12 +101,19 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
     }
   }
 
-  vector<unique_ptr<Expression>> order_by_expressions;
-  for (unique_ptr<Expression> &expression : select_sql.order_by) {
-    RC rc = expression_binder.bind_expression(expression, order_by_expressions);
+  vector<OrderByUnit> order_by_units;
+  for (OrderByUnit &order_by_unit : select_sql.order_by) {
+    vector<unique_ptr<Expression>> bound_expressions;
+    RC rc = expression_binder.bind_expression(order_by_unit.expression, bound_expressions);
     if (OB_FAIL(rc)) {
       LOG_INFO("bind order by expression failed. rc=%s", strrc(rc));
       return rc;
+    }
+    for (unique_ptr<Expression> &expression : bound_expressions) {
+      OrderByUnit bound_unit;
+      bound_unit.expression = std::move(expression);
+      bound_unit.direction = order_by_unit.direction;
+      order_by_units.emplace_back(std::move(bound_unit));
     }
   }
 
@@ -188,7 +195,7 @@ RC SelectStmt::create(Db *db, SelectSqlNode &select_sql, Stmt *&stmt)
   select_stmt->filter_stmt_ = filter_stmt;
   select_stmt->where_expression_ = std::move(final_where_expression);
   select_stmt->group_by_.swap(group_by_expressions);
-  select_stmt->order_by_.swap(order_by_expressions);
+  select_stmt->order_by_.swap(order_by_units);
   stmt                      = select_stmt;
   return RC::SUCCESS;
 }

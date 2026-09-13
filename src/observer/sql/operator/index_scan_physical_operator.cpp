@@ -26,9 +26,11 @@ IndexScanPhysicalOperator::IndexScanPhysicalOperator(Table *table, Index *index,
 {
   if (left_value) {
     left_value_ = *left_value;
+    has_left_value_ = true;
   }
   if (right_value) {
     right_value_ = *right_value;
+    has_right_value_ = true;
   }
 }
 
@@ -38,10 +40,11 @@ RC IndexScanPhysicalOperator::open(Trx *trx)
     return RC::INTERNAL;
   }
 
-  IndexScanner *index_scanner = index_->create_scanner(left_value_.data(),
+  // scanner 用 nullptr 表示无界；不能把默认 Value 的内部地址误当成真实边界。
+  IndexScanner *index_scanner = index_->create_scanner(has_left_value_ ? left_value_.data() : nullptr,
       left_value_.length(),
       left_inclusive_,
-      right_value_.data(),
+      has_right_value_ ? right_value_.data() : nullptr,
       right_value_.length(),
       right_inclusive_);
   if (nullptr == index_scanner) {

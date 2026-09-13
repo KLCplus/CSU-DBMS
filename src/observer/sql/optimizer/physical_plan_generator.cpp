@@ -75,6 +75,10 @@ RC PhysicalPlanGenerator::create(LogicalOperator &logical_operator, unique_ptr<P
       return create_plan(static_cast<InsertLogicalOperator &>(logical_operator), oper, session);
     } break;
 
+    case LogicalOperatorType::UPDATE: {
+      return create_plan(static_cast<UpdateLogicalOperator &>(logical_operator), oper, session);
+    } break;
+
     case LogicalOperatorType::DELETE: {
       return create_plan(static_cast<DeleteLogicalOperator &>(logical_operator), oper, session);
     } break;
@@ -136,11 +140,18 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
 
   Index     *index      = nullptr;
   ValueExpr *value_expr = nullptr;
+  CompOp     index_comp = NO_OP;
   for (auto &expr : predicates) {
     if (expr->type() == ExprType::COMPARISON) {
       auto comparison_expr = static_cast<ComparisonExpr *>(expr.get());
-      // 简单处理，就找等值查询
-      if (comparison_expr->comp() != EQUAL_TO && comparison_expr->comp() != NOT_EQUAL) {
+      // 当前 IndexScan 只能表示一个连续键值区间。“!=”需要两个不连续区间，
+      // 因此不能转换为单个 IndexScan，这里保留谓词并回退到 TableScan + Filter。
+      if (comparison_expr->comp() == NOT_EQUAL) {
+        continue;
+      }
+      if (comparison_expr->comp() != EQUAL_TO && comparison_expr->comp() != LESS_THAN &&
+          comparison_expr->comp() != LESS_EQUAL && comparison_expr->comp() != GREAT_THAN &&
+          comparison_expr->comp() != GREAT_EQUAL) {
         continue;
       }
 
@@ -156,10 +167,19 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
         ASSERT(right_expr->type() == ExprType::VALUE, "right expr should be a value expr while left is field expr");
         field_expr = static_cast<FieldExpr *>(left_expr.get());
         value_expr = static_cast<ValueExpr *>(right_expr.get());
+        index_comp = comparison_expr->comp();
       } else if (right_expr->type() == ExprType::FIELD) {
         ASSERT(left_expr->type() == ExprType::VALUE, "left expr should be a value expr while right is a field expr");
         field_expr = static_cast<FieldExpr *>(right_expr.get());
         value_expr = static_cast<ValueExpr *>(left_expr.get());
+        // 常量在左侧时需要翻转比较方向，例如 3 < key 等价于 key > 3。
+        switch (comparison_expr->comp()) {
+          case LESS_THAN: index_comp = GREAT_THAN; break;
+          case LESS_EQUAL: index_comp = GREAT_EQUAL; break;
+          case GREAT_THAN: index_comp = LESS_THAN; break;
+          case GREAT_EQUAL: index_comp = LESS_EQUAL; break;
+          default: index_comp = comparison_expr->comp(); break;
+        }
       }
 
       if (field_expr == nullptr) {
@@ -177,14 +197,39 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   if (index != nullptr) {
     ASSERT(value_expr != nullptr, "got an index but value expr is null ?");
 
-    const Value               &value           = value_expr->get_value();
+    const Value &value           = value_expr->get_value();
+    const Value *left_value      = nullptr;
+    const Value *right_value     = nullptr;
+    bool         left_inclusive  = false;
+    bool         right_inclusive = false;
+
+    // 等值同时约束左右边界；范围条件只设置一侧，nullptr 表示该侧无界。
+    // <= 和 >= 必须包含边界值，< 和 > 则必须排除边界值。
+    switch (index_comp) {
+      case EQUAL_TO:
+        left_value = right_value = &value;
+        left_inclusive = right_inclusive = true;
+        break;
+      case LESS_THAN: right_value = &value; break;
+      case LESS_EQUAL:
+        right_value = &value;
+        right_inclusive = true;
+        break;
+      case GREAT_THAN: left_value = &value; break;
+      case GREAT_EQUAL:
+        left_value = &value;
+        left_inclusive = true;
+        break;
+      default: ASSERT(false, "unsupported comparison operator for index scan");
+    }
+
     IndexScanPhysicalOperator *index_scan_oper = new IndexScanPhysicalOperator(table,
         index,
         table_get_oper.read_write_mode(),
-        &value,
-        true /*left_inclusive*/,
-        &value,
-        true /*right_inclusive*/);
+        left_value,
+        left_inclusive,
+        right_value,
+        right_inclusive);
 
     index_scan_oper->set_predicates(std::move(predicates));
     oper = unique_ptr<PhysicalOperator>(index_scan_oper);
@@ -420,7 +465,7 @@ RC PhysicalPlanGenerator::create_plan(SortLogicalOperator &sort_oper, unique_ptr
     return rc;
   }
 
-  auto sort_physical_oper = make_unique<SortPhysicalOperator>(std::move(sort_oper.order_by_expressions()));
+  auto sort_physical_oper = make_unique<SortPhysicalOperator>(std::move(sort_oper.order_by_units()));
   sort_physical_oper->add_child(std::move(child_physical_oper));
 
   oper = std::move(sort_physical_oper);

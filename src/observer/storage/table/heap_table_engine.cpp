@@ -103,6 +103,68 @@ RC HeapTableEngine::delete_record(const Record &record)
   return rc;
 }
 
+RC HeapTableEngine::update_record_with_trx(const Record &old_record, const Record &new_record, Trx *)
+{
+  if (old_record.rid() != new_record.rid() || old_record.len() != new_record.len()) {
+    return RC::INVALID_ARGUMENT;
+  }
+
+  vector<Index *> affected_indexes;
+  for (Index *index : indexes_) {
+    const FieldMeta *field_meta = table_meta_->field(index->index_meta().field());
+    if (field_meta == nullptr) {
+      return RC::SCHEMA_FIELD_MISSING;
+    }
+    // 未改变索引键时无需重建 entry；只维护真正受 UPDATE 影响的索引。
+    if (memcmp(old_record.data() + field_meta->offset(), new_record.data() + field_meta->offset(), field_meta->len()) != 0) {
+      affected_indexes.push_back(index);
+    }
+  }
+
+  vector<Index *> deleted_old_entries;
+  for (Index *index : affected_indexes) {
+    RC rc = index->delete_entry(old_record.data(), &old_record.rid());
+    if (OB_FAIL(rc)) {
+      for (Index *deleted_index : deleted_old_entries) {
+        deleted_index->insert_entry(old_record.data(), &old_record.rid());
+      }
+      return rc;
+    }
+    deleted_old_entries.push_back(index);
+  }
+
+  vector<Index *> inserted_new_entries;
+  for (Index *index : affected_indexes) {
+    RC rc = index->insert_entry(new_record.data(), &new_record.rid());
+    if (OB_FAIL(rc)) {
+      for (Index *inserted_index : inserted_new_entries) {
+        inserted_index->delete_entry(new_record.data(), &new_record.rid());
+      }
+      for (Index *deleted_index : deleted_old_entries) {
+        deleted_index->insert_entry(old_record.data(), &old_record.rid());
+      }
+      return rc;
+    }
+    inserted_new_entries.push_back(index);
+  }
+
+  // UPDATE 保持原 RID，并通过 RecordFileHandler 原位写回真实数据页。
+  RC rc = record_handler_->visit_record(old_record.rid(), [&new_record](Record &record) {
+    memcpy(record.data(), new_record.data(), new_record.len());
+    return true;
+  });
+  if (OB_FAIL(rc)) {
+    // 数据页写回失败时尽力恢复旧索引，避免留下明显的新键/旧记录不一致。
+    for (Index *index : inserted_new_entries) {
+      index->delete_entry(new_record.data(), &new_record.rid());
+    }
+    for (Index *index : deleted_old_entries) {
+      index->insert_entry(old_record.data(), &old_record.rid());
+    }
+  }
+  return rc;
+}
+
 RC HeapTableEngine::get_record_scanner(RecordScanner *&scanner, Trx *trx, ReadWriteMode mode)
 {
   scanner = new HeapRecordScanner(table_, *data_buffer_pool_, trx, db_->log_handler(), mode, nullptr);
