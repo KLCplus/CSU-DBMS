@@ -312,13 +312,27 @@ void print_startup_screen()
 ╰──────────────────────────────────────────────────────────╯
 )";
 
-  if (strcasecmp(the_process_param()->get_protocol().c_str(), "cli") == 0) {
+  ProcessParam *parameter = the_process_param();
+  if (strcasecmp(parameter->get_protocol().c_str(), "cli") == 0) {
+    cout << " Mode           : Embedded CLI" << endl;
+    cout << " Data directory : " << parameter->data_dir() << endl;
+    cout << " Status         : READY" << endl << endl;
     cout << "Ready. Enter SQL directly (a trailing ';' is recommended)." << endl;
     cout << "Type 'help;' for SQL examples; type 'exit' or '\\q' to leave." << endl;
-    cout << "Data directory: " << the_process_param()->data_dir() << endl << endl;
   } else {
-    cout << "Data directory : " << the_process_param()->data_dir() << endl;
-    cout << "CSUDB server is starting. Press Ctrl+C to stop." << endl << endl;
+    const int port = parameter->get_server_port() > 0 ? parameter->get_server_port() : PORT_DEFAULT;
+    const string client_host = parameter->listen_host() == "0.0.0.0" ? "127.0.0.1" : parameter->listen_host();
+    cout << " Mode           : Database Server" << endl;
+    cout << " Protocol       : " << parameter->get_protocol() << endl;
+    cout << " Listen         : " << parameter->listen_host() << ':' << port << endl;
+    cout << " Data directory : " << parameter->data_dir() << endl;
+    cout << " Status         : STARTING" << endl;
+    cout << "────────────────────────────────────────────────────────────" << endl;
+    cout << " Connect        : csudb -h " << client_host << " -P " << port << " -u root -p" << endl;
+    if (strcasecmp(parameter->get_protocol().c_str(), "native") == 0) {
+      cout << " Web Console    : connect with csudb, then enter /web" << endl;
+    }
+    cout << " Stop           : Ctrl+C (graceful shutdown)" << endl << endl;
   }
 }
 
