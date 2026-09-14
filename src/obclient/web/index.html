@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>CSUDB 2026 · Database Management Console</title>
-  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/app.css?v=4">
 </head>
 <body>
 <div id="login" class="login-screen">
@@ -18,5 +18,5 @@
 <section id="page-schema" class="page"><div class="page-head"><div><div class="eyebrow">CATALOG</div><h1>Schema Graph</h1><p class="muted">Visualize tables and database schema metadata.</p></div><div class="inline-tools"><input id="schema-search" placeholder="Search tables…"><button class="ghost" data-refresh>Refresh</button></div></div><div class="schema-layout"><article class="panel"><div class="panel-head"><h2>Tables</h2><span class="muted">Relationships appear when metadata is available.</span></div><div id="schema-graph" class="schema-graph"></div></article><aside class="panel schema-detail"><div class="detail-tabs"><b>Details</b><span>Tables</span></div><h2 id="schema-title">Select a table</h2><div id="schema-columns" class="empty">Choose a table to inspect its columns.</div></aside></div></section>
 <section id="page-data" class="page"><div class="page-head"><div><div class="eyebrow">EXPLORER</div><h1>Data Explorer</h1><p class="muted">Browse up to 100 rows from a table.</p></div><div class="selectors"><label>Table<select id="table-select"></select></label><button class="ghost" id="load-table">Load</button></div></div><article class="panel"><div class="tabs"><button class="active" data-tab="rows">Rows</button><button data-tab="structure">Structure</button><button data-tab="indexes">Indexes</button></div><div id="data-content" class="result-grid"><div class="empty">Select a table to load data.</div></div></article></section>
 <section id="page-internals" class="page"><div class="page-head"><div><div class="eyebrow">OBSERVABILITY</div><h1>Internals</h1><p class="muted">Read-only storage and buffer pool diagnostics.</p></div><button class="ghost" data-refresh>Refresh</button></div><div class="metric-strip"><div><span>CAPACITY</span><strong id="i-capacity">0</strong></div><div><span>USED</span><strong id="i-used">0</strong></div><div><span>PINNED</span><strong id="i-pinned">0</strong></div><div><span>DIRTY</span><strong id="i-dirty">0</strong></div><div><span>READS</span><strong id="i-reads">0</strong></div><div><span>WRITES</span><strong id="i-writes">0</strong></div></div><article class="panel"><div class="panel-head"><div><h2>Frame Map</h2><p class="muted">Each block is a frame returned by BufferPoolSnapshot.</p></div><div class="buffer-key"><span><i class="free"></i>Free</span><span><i class="used"></i>Clean</span><span><i class="pinned"></i>Pinned</span><span><i class="dirty"></i>Dirty</span></div></div><div id="frame-map" class="frame-map"></div><div id="frame-table" class="result-grid"></div></article></section>
-</main></div><script src="/app.js"></script>
+</main></div><script src="/app.js?v=4"></script>
 </body></html>
