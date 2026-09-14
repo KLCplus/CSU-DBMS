@@ -267,6 +267,21 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("invalid database name")
                 result = connection._request({"type": "query", "sql": f"USE {database};"})
                 self._send_json(HTTPStatus.OK, public_result(result))
+            elif parsed.path == "/api/complete":
+                sql = str(body.get("sql", ""))
+                cursor = body.get("cursor", len(sql))
+                try:
+                    cursor = max(0, min(int(cursor), len(sql)))
+                except (TypeError, ValueError):
+                    cursor = len(sql)
+                result = connection._request({
+                    "type": "complete",
+                    "sql": sql,
+                    "cursor": cursor,
+                    "max_items": 12,
+                    "want_model": bool(body.get("want_model", False)),
+                })
+                self._send_json(HTTPStatus.OK, public_result(result))
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"success": False, "error": {"message": "unknown endpoint"}})
         except (csudb.Error, ValueError) as exc:
