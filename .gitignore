@@ -36,3 +36,6 @@ src/observer/sql/parser/lex_sql.cpp
 src/observer/sql/parser/lex_sql.h
 src/observer/sql/parser/yacc_sql.cpp
 src/observer/sql/parser/yacc_sql.hpp
+
+# client distribution packages
+dist/
