@@ -1,15 +1,15 @@
 # SQL 编译器详细规格说明书（Spec）
 
-- 版本：v2.1（函数级）
+- 版本：v3.0（编译器层，函数级）
 - 日期：2026-09-14
-- 适用范围：`/root/CSU-DBMS`（OceanBase Miniob 改造版，含 CSUDB 产品级存储引擎、SQL 输入补全）
+- 适用范围：**SQL 编译器层** —— `src/observer/sql/parser/`（词法 / 语法 / 语义分析）与 `src/observer/sql/autocomplete/`（SQL 输入补全）
 - 上游文档：
   - `SQL_description/requirements.md`（验收需求拆解）
   - `SQL_description/文件结构规划.md`（代码目录与职责划分）
   - `SQL_description/检录报告.md`（需求对照与现状盘点）
-- 路径约定：未写前缀的文件路径相对于 `src/observer/sql/`；`storage/`、`common/`、`type/` 相对于 `src/observer/`。
+- 路径约定：未写前缀的文件路径相对于 `src/observer/sql/`；`common/` 相对于 `src/observer/`。
+- 范围说明：本文档**只覆盖本人负责的编译器层**。查询处理 / 执行（`stmt/`、`expr/`、`optimizer/`、`operator/`、`executor/`）与存储（`storage/`）属队友负责，不在本文档范围。
 
----
 
 ## 1. 概述
 
@@ -30,41 +30,35 @@ SQL 文本
 
 ---
 
+
 ## 2. 目标与非目标
 
-### 2.1 目标（必须完成）
+### 2.1 目标（编译器层）
 
-- 必备语句：`CREATE`、`INSERT`、`SELECT`、`DELETE`、`WHERE`。
-- 布尔表达式：比较运算、`AND`、`OR`、`NOT`、括号。
-- 进阶语句：`UPDATE`、`ORDER BY`、`GROUP BY`、`JOIN`、算术表达式、`NULL`、最小 `DATE`。
-- 词法：识别关键字/标识符/常量/运算符/分隔符、跳过空白与注释、字符串、大小写不敏感、输出 Token 行列位置。
-- 语法：优先级（`NOT > 比较 > AND > OR`）、括号显式改变结合、构造 AST、多语句输入。
-- 语义：表/列存在性校验、名字绑定、类型一致性、`INSERT` 匹配。
-- 系统工程：AST→逻辑计划→物理计划、规则式优化（常量折叠、布尔化简、投影裁剪、谓词下推、冗余节点消除）、JSON 输出。
-- 语义/语法错误必须携带**类型 + 行列位置 + 原因**，且不崩溃。
+- 词法：识别关键字 / 标识符 / 常量 / 运算符 / 分隔符、跳过空白与注释、字符串与转义、大小写不敏感、输出 Token 行列位置。
+- 语法：优先级（`NOT > 比较 > AND > OR`）、括号显式改变结合、构造 AST、多语句输入、语法诊断（位置 + 实际符号 + 期望集合）。
+- 语义：表/列存在性校验、名字绑定、类型一致性、`INSERT` 匹配、语义错误定位。
+- SQL 输入补全：确定性（Parser + Catalog）+ 可选 FIM 模型。
+- 语法/语义错误必须携带**类型 + 行列位置 + 原因**，且不崩溃。
 
-### 2.2 现状与补齐情况
+### 2.2 编译器层现状
 
 | 能力 | 状态 | 目标规格所在章节 |
 | --- | --- | --- |
 | 字符串转义 `Tom''s` | ✅ 已实现（`''`/`""`/`\x`） | §6.4 |
-| 投影裁剪 / Project[*] 消除 | ✅ 已实现（列裁剪） | §10.3 |
+| 语法 `expected:` 期望集合 | ✅ 已实现 | §7.5 |
 | 语义错误结构化定位 | ✅ 已实现 | §8.5 |
 | INSERT 逐列 TypeMismatch 报告 | ✅ 已实现（含列清单） | §8.4 |
 | 类型一致性严格校验 | ✅ 已实现 | §5.3、§8.3 |
-| 语法 `expected:` 期望集合 | ✅ 已实现 | §7.4 |
 | SQL 输入自动补全 | ✅ 新增（CLI + Web，确定性 + 可选 FIM 模型） | §18 |
-| 自动化测试集 | ✅ 新增 | §14 |
-
-> 本版状态：必备能力、进阶能力、词法/语法/语义关键要求均已实现；另修复了词法器缺 `OR`、NOT 优先级、标识符大小写、空字符串崩溃、多余右括号、一元负号、NOT 布尔比较、NULL 分组、UPDATE NULL 位图、OR 谓词下推等基础缺陷。
 
 ### 2.3 非目标
 
-- 事务隔离级别与并发控制的完整实现（仅保留 `TRX_BEGIN/COMMIT/ROLLBACK` 语法外壳）。
-- 完整的 SQL 标准（不支持子查询、`HAVING`、`UNION`、窗口函数等）。
-- 向量检索（`VECTORS` 类型仅保留类型定义，不作为本阶段验收重点）。
+- 完整 SQL 标准（不支持子查询、`HAVING`、`UNION`、窗口函数等）。
+- 计划、优化、算子、执行、存储等编译器下游能力（队友负责，不在本文档范围）。
 
 ---
+
 
 ## 3. 术语
 
@@ -81,18 +75,19 @@ SQL 文本
 
 ---
 
+
 ## 4. 总体架构与数据流
+
 
 ### 4.1 Stage 编排（函数级）
 
 | 阶段 | 实现（文件） | 关键函数 | 输入 → 输出 |
 | --- | --- | --- | --- |
-| ParseStage | `parser/parse_stage.*` | `ParseStage::handle_request` | SQL 字符串 → `ParsedSqlResult` |
-| ResolveStage | `parser/resolve_stage.*` | `ResolveStage::handle_request` | 中间 AST → `Stmt *` |
-| OptimizeStage | `optimizer/optimize_stage.*` | `handle_request` → `create_logical_plan` → `rewrite` → `generate_physical_plan` | `Stmt *` → `PhysicalOperator *` |
-| ExecuteStage | `executor/execute_stage.*` | `handle_request` / `handle_request_with_physical_operator` | 物理计划 → `SqlResult` |
-| PlanCacheStage | `plan_cache/plan_cache_stage.*` | —（当前空实现） | 缓存计划（可选） |
-| QueryCacheStage | `query_cache/query_cache_stage.*` | `QueryCacheStage::handle_request` | 缓存结果（可选） |
+| ParseStage | `parser/parse_stage.*` | `ParseStage::handle_request` | SQL 字符串 → `ParsedSqlResult`（AST） |
+| ResolveStage | `parser/resolve_stage.*` | `ResolveStage::handle_request` | AST → `Stmt *`（名字 / 表达式绑定） |
+
+> 之后的 `OptimizeStage` / `ExecuteStage`（计划、优化、执行）属查询处理层，由队友负责。
+
 
 ### 4.2 表达式语义模型
 
@@ -112,6 +107,7 @@ SQL 文本
 `ExprType` 枚举：`NONE, STAR, UNBOUND_FIELD, UNBOUND_AGGREGATION, FIELD, VALUE, CAST, COMPARISON, CONJUNCTION, ARITHMETIC, AGGREGATION`。
 
 ---
+
 
 ## 5. 类型系统
 
@@ -174,6 +170,7 @@ INT  +  VARCHAR  -> ERROR   // 已严格报错：operator '+' cannot be applied 
 
 ---
 
+
 ## 6. 词法分析规范
 
 ### 6.1 输入输出
@@ -210,6 +207,7 @@ INT  +  VARCHAR  -> ERROR   // 已严格报错：operator '+' cannot be applied 
 - 未闭合字符串、非法字符（如 `@`）返回词法/语法错误（类型 + 位置 + 原因），不崩溃。
 
 ---
+
 
 ## 7. 语法分析规范
 
@@ -270,6 +268,7 @@ expected: LBRACE | NULL_T | NUMBER | FLOAT | ID | SSS | '-' | '*' | NOT
 
 ---
 
+
 ## 8. 语义分析规范
 
 ### 8.1 名字绑定（函数级）
@@ -301,7 +300,8 @@ expected: LBRACE | NULL_T | NUMBER | FLOAT | ID | SSS | '-' | '*' | NOT
 - 算术/比较运算的左右操作数类型需满足 §5.3 的类型规则，不满足（如 `INT + VARCHAR`）报「operator '+' cannot be applied to INT and VARCHAR」。
 - 实现：`parser/expression_binder.cpp::bind_arithmetic_expression` 校验左右 `value_type()` 是否为数值类型，`set_arithmetic_type_error` 生成带位置的语义错误；
   算术表达式的行列记录为**运算符位置**（`yacc_sql.y::create_arithmetic_expression`）。
-- `optimizer/logical_plan_generator.cpp::implicit_cast_cost` 仍用于 WHERE 旧路径中可隐式转换的数值类型（`INT`↔`FLOAT`）。
+
+
 
 ### 8.4 INSERT 匹配（已实现）
 
@@ -323,141 +323,7 @@ expected: LBRACE | NULL_T | NUMBER | FLOAT | ID | SSS | '-' | '*' | NOT
 
 ---
 
-## 9. NULL 语义规范
-
-### 9.1 表示
-
-- 存储层：每张表维护 **NULL 位图**，`TableMeta` 记录其偏移与大小；`FieldMeta` 记录字段是否 `nullable`。
-- 值层：`Value::is_null_` 标志位（与类型解耦）。
-- 记录创建：`Table::make_record` 校验非空约束（`NOT NULL` 违反报 `SCHEMA_FIELD_NOT_NULL`），并写入 NULL 位图；`Table::set_value_to_record` 设置具体字段值。
-- 记录读取：`expr/tuple.h::RowTuple::cell_at` 检查 NULL 位图，对应字段为 NULL 时返回 `Value::null_value()`。
-
-### 9.2 三值逻辑
-
-- 比较运算：`ComparisonExpr::compare_value` 对 `IS_NULL / IS_NOT_NULL` 特判；普通比较中任一操作数为 `NULL` → 结果为 `UNKNOWN`。
-- NOT：`NOT x` 降级为 `x == false`；在 `NULL` 上为 `UNKNOWN`。
-- AND/OR：`ConjunctionExpr::get_value` 实现真值表（`TRUE/FALSE/UNKNOWN`）。
-
-### 9.3 聚合函数与 NULL
-
-| 聚合函数 | 类（`expr/aggregator.*`） | NULL 处理契约 |
-| --- | --- | --- |
-| `COUNT` | `CountAggregator` | `accumulate` 跳过 `NULL`（`!is_null()` 才 `++count_`） |
-| `SUM` | `SumAggregator` | 跳过 `NULL`，空组返回 `NULL` |
-| `AVG` | `AvgAggregator` | 跳过 `NULL`，计数与求和只含非空值 |
-| `MIN` | `MinAggregator` | 跳过 `NULL`，空组 `evaluate` 返回 `NULL` |
-| `MAX` | `MaxAggregator` | 跳过 `NULL`，空组 `evaluate` 返回 `NULL` |
-
-聚合器接口：`Aggregator::accumulate(const Value&)` 与 `evaluate(Value&)`。聚合入口：`AggregateExpr::create_aggregator` / `AggregateExpr::get_value`（`expr/expression.cpp`）。
-
----
-
-## 10. 优化器规范
-
-### 10.1 AST → 逻辑计划 → 物理计划（函数级）
-
-| 文件 | 类 | 关键函数 | 契约 |
-| --- | --- | --- | --- |
-| `optimizer/logical_plan_generator.*` | `LogicalPlanGenerator` | `create`（分发）、`create_plan`（各 Stmt 重载）、`create_group_by_plan`、`implicit_cast_cost` | AST → 逻辑算子树（`FROM`→`TableGet`、`WHERE`→`Predicate`、`SELECT 列表`→`Project`） |
-| `optimizer/physical_plan_generator.*` | `PhysicalPlanGenerator` | `create`、`create_plan`（各逻辑算子重载）、`create_vec`、`create_vec_plan`、`can_use_hash_join` | 逻辑 → 物理算子树（含向量化） |
-| `optimizer/optimize_stage.*` | `OptimizeStage` | `handle_request`、`create_logical_plan`、`rewrite`、`optimize`、`generate_physical_plan` | 优化阶段编排 |
-
-### 10.2 规则式优化（函数级）
-
-| 规则 | 类 | 关键函数 | 效果 |
-| --- | --- | --- | --- |
-| 常量折叠 | `ArithmeticSimplificationRule` | `rewrite` | `age > 10+8` → `age > 18` |
-| 布尔化简 | `ConjunctionSimplificationRule` | `rewrite` | `x AND TRUE` → `x` |
-| 比较化简 | `ComparisonSimplificationRule` | `rewrite` | 常量比较化简 |
-| 谓词下推 | `PredicatePushdownRewriter` | `rewrite`、`is_empty_predicate`、`get_exprs_can_pushdown` | 尽量提前过滤（OR 保留在 Predicate 执行） |
-| 冗余节点消除 | `PredicateRewriteRule` | `rewrite` | 消除恒真/恒假 Filter |
-| 谓词转 JOIN | `PredicateToJoinRewriter` | — | 隐式 JOIN → 显式 JOIN |
-| 投影裁剪 | `ProjectionPruningRule` | `rewrite` | 只保留查询真正需要的列 |
-
-框架与执行入口：
-
-| 类 | 关键函数 | 说明 |
-| --- | --- | --- |
-| `Rewriter` | `rewrite` | 重写器入口 |
-| `ExpressionRewriter` | `rewrite`、`rewrite_expression` | 表达式自底向上重写 |
-
-### 10.3 投影裁剪（已实现）
-
-- 目标：仅保留查询真正需要的列。
-- 实现：`optimizer/projection_pruning_rule.cpp::ProjectionPruningRule::rewrite` 在 Projection 节点收集整棵子树引用到的字段
-  （含 WHERE/ORDER BY/GROUP BY/JOIN/聚合/下推谓词），按表定义顺序写入 `TableGetLogicalOperator::set_used_fields`；
-  物理计划据此只让 `TableScanPhysicalOperator` 输出这些列（`set_used_fields`）。
-- `expr/tuple.h::RowTuple::cell_at` 在裁剪后按字段原始下标访问 NULL 位图，保证 NULL 语义正确。
-- 恒真 `Filter` 由 `PredicateRewriteRule` 消除；向量化路径与索引扫描路径保守地不裁剪（返回全字段，正确性不受影响）。
-
-### 10.4 计划可视化 / EXPLAIN
-
-- `EXPLAIN` 通过 `operator/explain_physical_operator.*::ExplainPhysicalOperator::generate_physical_plan` 输出物理计划树。
-- 计划打印：`optimizer/optimizer_utils.*::OptimizerUtils::dump_physical_plan`。
-- 测试要求：能从任意 SELECT AST 解释每个 Plan 节点为何产生、节点间数据流关系；能展示优化前后结构变化（如 `WHERE 1=1 AND age>10+8` → `Filter[age>18]`）。
-
-### 10.5 Cascades 优化器框架（`optimizer/cascade/`）
-
-| 文件 | 类 | 关键函数 |
-| --- | --- | --- |
-| `optimizer.*` | `Optimizer` | `optimize`、`choose_best_plan`、`optimize_loop`、`execute_task_stack` |
-| `optimizer_context.*` | `OptimizerContext` | `record_operator_node_in_memo`、`record_node_into_group`、`push_task`、`get_cost_upper_bound` |
-| `memo.*` | `Memo` | `record_operator`、`release_operator`、`add_new_group`、`dump` |
-| `group.*` | `Group` | `add_expr`、`set_expr_cost`、`get_cost_lb`、`dump` |
-| `group_expr.*` | `GroupExpr` | `hash`、`set_local_cost`、`get_cost`、`dump` |
-| `cost_model.*` | `CostModel` | `calculate_cost`、`cpu_op`、`hash_cost`、`hash_probe`、`index_probe`、`io` |
-| `implementation_rules.*` | `LogicalGetToPhysicalSeqScan` 等 | `transform` |
-| `tasks/*` | `CascadeTask`、`OptimizeGroup`、`OptimizeExpression`、`OptimizeInputs`、`ExploreGroup`、`ApplyRule` | `perform`、`push_task` |
-
----
-
-## 11. 执行引擎规范
-
-### 11.1 物理算子（火山模型，函数级）
-
-物理算子统一实现 `open() / next() / close()` 迭代协议，`next()` 逐行产出 `Tuple`，返回 `RC::RECORD_EOF` 表示结束。
-
-| 算子 | 文件 | 关键函数 |
-| --- | --- | --- |
-| TableScan | `operator/table_scan_physical_operator.*` | `open/next/close`、`filter`、`set_predicates`、`param` |
-| IndexScan | `operator/index_scan_physical_operator.*` | `open/next/close`、`filter`、`set_predicates`、`param` |
-| Predicate | `operator/predicate_physical_operator.*` | `open/next/close`、`tuple_schema` |
-| Project | `operator/project_physical_operator.*` | `open/next/close`、`tuple_schema` |
-| Sort | `operator/sort_physical_operator.*` | `open/next/close`、`evaluate_order_by`、`param` |
-| GroupBy（基类） | `operator/group_by_physical_operator.*` | `create_aggregator_list`、`aggregate`、`evaluate` |
-| ScalarGroupBy | `operator/scalar_group_by_physical_operator.*` | `open/next/close` |
-| HashGroupBy | `operator/hash_group_by_physical_operator.*` | `open/next/close`、`find_group` |
-| NestedLoopJoin | `operator/nested_loop_join_physical_operator.*` | `open/next/close`、`left_next`、`right_next` |
-| HashJoin | `operator/hash_join_physical_operator.*` | — |
-| Insert | `operator/insert_physical_operator.*` | `open/next/close` |
-| Delete | `operator/delete_physical_operator.*` | `open/next/close` |
-| Update | `operator/update_physical_operator.*` | `open/next/close` |
-| Explain | `operator/explain_physical_operator.*` | `open/next/close`、`generate_physical_plan` |
-
-向量化算子（`*_vec_physical_operator.*`）：`TableScanVec`、`ProjectVec`、`ExprVec`、`AggregateVec`、`GroupByVec`，均实现 `open/next/close`。
-
-### 11.2 结果集输出
-
-- `executor/sql_result.*::SqlResult`：`set_tuple_schema`、`set_operator`、`open`、`close`、`next_tuple`、`next_chunk` 收集 Tuple 并迭代输出。
-- 输出形式：JSON。
-- 简单命令执行器（`SHOW TABLES`、`DESC`、`HELP`、`EXIT`、`TRX_*`）通过 `executor/command_executor.*::CommandExecutor::execute` 分发。
-
----
-
-## 12. 存储引擎接口（Catalog）
-
-| 接口 | 实现 | 说明 |
-| --- | --- | --- |
-| `create_table` | `storage/db/db.cpp::Db::create_table` | 建表并注册元数据 |
-| `find_table` | `Db::find_table` | 查表（存在性校验） |
-| `insert_record` | `storage/table/table.cpp::Table::insert_record` | 写入记录 |
-| `make_record` | `Table::make_record` | 构造记录 + 非空校验 + NULL 位图 |
-| `set_value_to_record` | `Table::set_value_to_record` | 设置字段值 |
-| 元数据 | `storage/table/table_meta.*`、`storage/field/field_meta.*` | 表/字段元数据，含 NULL 位图偏移/大小、nullable |
-
-**Catalog 需求**（`requirements.md`）：Catalog 需提供 `createTable / findTable / findColumn / getType`，同时服务执行引擎与持久化。
-
----
+> 说明：原 §9–§12（NULL 执行语义、优化器规范、执行引擎规范、存储引擎接口）属于查询处理 / 执行 / 存储层，由队友负责，本文档不再收录，故章节号从 §8 直接跳到 §13。
 
 ## 13. 错误处理规范
 
@@ -470,36 +336,37 @@ expected: LBRACE | NULL_T | NUMBER | FLOAT | ID | SSS | '-' | '*' | NOT
 
 ---
 
-## 14. 测试与验收规范
+
+## 14. 测试与验收规范（编译器层）
 
 ### 14.1 测试体系
 
 | 类别 | 内容 |
 | --- | --- |
-| 核心正常执行 | CREATE/INSERT/SELECT/DELETE/UPDATE 等正确执行 |
 | 词法错误 | 非法字符、字符串未闭合 |
-| 语法错误 | 缺分号、括号不匹配、结构错误 |
+| 语法错误 | 缺操作数、括号不匹配、结构错误 |
 | 语义错误 | 表/列不存在、类型不匹配 |
 | 边界测试 | 空输入、极长标识符、多语句、大小写 |
-| 自建测试集 | 覆盖上述全部能力 |
 | 补全测试 | 关键字/表/列/INSERT 补全、方言门禁、注释/字符串/多语句/大小写 |
+| 自建测试集 | 覆盖上述编译器能力 |
 
-自动化测试集位置：`SQL_description/test/`（`run_tests.py` + `cases/{lexer,parser,semantic,core_sql,boundary,autocomplete}.py`）；
+自动化测试集位置：`SQL_description/test/`（`run_tests.py` + `cases/{lexer,parser,semantic,autocomplete}.py`）；
 补全单元测试：`unittest/observer/autocomplete_test.cpp`。运行方式：
 
 ```bash
 ./build.sh debug --make -j4
-python3 SQL_description/test/run_tests.py            # 自动拉起临时 csudbd
-python3 SQL_description/test/run_tests.py --filter autocomplete
+python3 SQL_description/test/run_tests.py --filter lexer        # 词法
+python3 SQL_description/test/run_tests.py --filter parser       # 语法
+python3 SQL_description/test/run_tests.py --filter semantic     # 语义
+python3 SQL_description/test/run_tests.py --filter autocomplete # 补全
 ctest -R autocomplete_test
 ```
 
 ### 14.2 关键验收用例（节选）
 
-- 注释、多字符运算符、字符串、大小写、非法输入（对应 `requirements.md` §词法测试要求）。
+- 注释、多字符运算符、字符串、大小写、非法输入（对应 `requirements.md` 词法测试要求）。
+- 语法优先级、括号、语法诊断（`expected:` 期望集合）。
 - 语义错误定位（`score` 列不存在、`age + 'abc'` 类型错误、`INSERT` 类型不匹配）。
-- 规划说明：能从任意 SELECT AST 解释每个 Plan 节点及数据流；能展示优化前后结构变化。
-- NULL 端到端：`test/case/test/primary-null.test`（建表 NULL/NOT NULL/DATE、INSERT NULL、非空约束、`IS [NOT] NULL`、三值逻辑、聚合跳过 NULL）。
 
 ### 14.3 关注指标
 
@@ -510,41 +377,34 @@ ctest -R autocomplete_test
 
 ---
 
-## 15. 能力矩阵与现状
+
+## 15. 编译器能力矩阵与现状
 
 | 能力 | 状态 | 关键实现（文件:函数） |
 | --- | --- | --- |
-| CREATE | ✅ | `stmt/create_table_stmt.cpp::CreateTableStmt::create`；`executor/create_table_executor.cpp::CreateTableExecutor::execute` |
-| INSERT | ✅ | `stmt/insert_stmt.cpp::InsertStmt::create`；`operator/insert_physical_operator.cpp::InsertPhysicalOperator::open` |
-| SELECT | ✅ | `stmt/select_stmt.cpp::SelectStmt::create`；`operator/project_physical_operator.cpp::ProjectPhysicalOperator::next` |
-| DELETE | ✅ | `stmt/delete_stmt.cpp::DeleteStmt::create`；`operator/delete_physical_operator.cpp::DeletePhysicalOperator::next` |
-| WHERE | ✅ | `operator/predicate_physical_operator.cpp::PredicatePhysicalOperator::next` |
-| 比较/AND/OR/NOT | ✅ | `expr/expression.cpp::ComparisonExpr::compare_value/get_value`、`ConjunctionExpr::get_value` |
-| 括号 | ✅ | `parser/yacc_sql.y`（`LBRACE boolean_expr RBRACE`） |
-| UPDATE | ✅ | `stmt/update_stmt.cpp::UpdateStmt::create`；`operator/update_physical_operator.cpp::UpdatePhysicalOperator::next` |
-| ORDER BY | ✅ | `operator/sort_physical_operator.cpp::SortPhysicalOperator::evaluate_order_by/next` |
-| GROUP BY | ✅ | `operator/scalar_group_by_physical_operator.cpp` / `hash_group_by_physical_operator.cpp` |
-| JOIN | ✅ | `operator/nested_loop_join_physical_operator.cpp::NestedLoopJoinPhysicalOperator::next` |
-| 算术表达式 | ✅ | `expr/expression.cpp::ArithmeticExpr::calc_value/get_value` |
-| NULL | ✅ | `expr/expression.cpp`（三值逻辑）、`common/value.h::Value::set_null/is_null`、`storage/table/table.cpp::Table::make_record` |
-| DATE | ✅ | `common/type/date_type.cpp::DateType::set_value_from_str`（整数 `YYYYMMDD`） |
-| 常量折叠 | ✅ | `optimizer/arithmetic_simplification_rule.cpp::ArithmeticSimplificationRule::rewrite` |
-| 布尔化简 | ✅ | `optimizer/conjunction_simplification_rule.cpp::ConjunctionSimplificationRule::rewrite` |
-| 谓词下推 | ✅ | `optimizer/predicate_pushdown_rewriter.cpp::PredicatePushdownRewriter::rewrite` |
-| 字符串转义 `Tom''s` | ✅ | `parser/lex_sql.l`（字符串规则）、`parser/yacc_sql.y::unescape_quoted_string` |
-| 投影裁剪 / Project[*] 消除 | ✅ | `optimizer/projection_pruning_rule.cpp::ProjectionPruningRule::rewrite` |
-| 语义错误定位 | ✅ | `parser/expression_binder.cpp`（消息槽）、`parser/resolve_stage.cpp` |
-| INSERT 逐列 TypeMismatch | ✅ | `stmt/insert_stmt.cpp::InsertStmt::create` |
-| 类型一致性严格校验 | ✅ | `parser/expression_binder.cpp::bind_arithmetic_expression` |
-| 语法 `expected:` 集合 | ✅ | `parser/yacc_sql.y::yyreport_syntax_error` + `%define parse.error custom` |
-| SQL 输入补全 | ✅ | `sql/autocomplete/*`、`service/database_service.cpp::complete_sql`、`obclient/client.cpp`、`obclient/web/*`（`/api/complete` + 候选下拉 + AI ghost） |
-| 自动化测试集 | ✅ | `SQL_description/test/`、`unittest/observer/autocomplete_test.cpp` |
+| 词法：关键字 / 标识符 / 常量 | ✅ | `parser/lex_sql.l` 规则段 |
+| 词法：运算符 / 分隔符 | ✅ | `parser/lex_sql.l`（`== = <= <> != < > >= + - * /`、`( ) , ; .`） |
+| 词法：注释 / 空白 | ✅ | `parser/lex_sql.l`（`--`、`/* */` + `%x COMMENT`、`WHITE_SPACE`） |
+| 词法：字符串与转义 | ✅ | `parser/lex_sql.l`（字符串规则）、`parser/yacc_sql.y::unescape_quoted_string` |
+| 词法：大小写不敏感 | ✅ | `parser/lex_sql.l`（`%option case-insensitive`） |
+| 词法：行列位置 | ✅ | `parser/lex_sql.l`（`%option yylineno` + `YY_USER_ACTION`） |
+| 语法：优先级 / 括号 | ✅ | `parser/yacc_sql.y`（`%left/%precedence`、`LBRACE boolean_expr RBRACE`） |
+| 语法：AST / 多语句 | ✅ | `parser/yacc_sql.y`、`parser/parse_defs.h` |
+| 语法：诊断（位置 + 实际符号 + 期望集合） | ✅ | `parser/yacc_sql.y::yyreport_syntax_error`、`parser/expected_tokens.h::collect_expected_tokens` |
+| 语义：表 / 列存在性 | ✅ | `parser/expression_binder.cpp::bind_unbound_field_expression` |
+| 语义：名字绑定 | ✅ | `parser/expression_binder.cpp::bind_expression` 及 `bind_*` |
+| 语义：类型一致性 | ✅ | `parser/expression_binder.cpp::bind_arithmetic_expression` |
+| 语义：INSERT 匹配（逐列 TypeMismatch） | ✅ | `stmt/insert_stmt.cpp::InsertStmt::create` |
+| 语义：错误定位 | ✅ | `parser/expression_binder.cpp`（消息槽）、`parser/resolve_stage.cpp` |
+| SQL 输入补全 | ✅ | `autocomplete/*`、`service/database_service.cpp::complete_sql`、`obclient/client.cpp`、`obclient/web/*` |
+| 编译器测试集 | ✅ | `SQL_description/test/`、`unittest/observer/autocomplete_test.cpp` |
 
 ---
 
-## 16. 函数级实现索引（按模块）
 
-> 完整「文件 → 类 → 函数」清单见 `SQL_description/文件结构规划.md` §3。此处按模块列出关键类与函数，作为 spec 的快速索引。
+## 16. 函数级实现索引（编译器层）
+
+> 完整「文件 → 类 → 函数」清单见 `SQL_description/文件结构规划.md` §3。
 
 ### 16.1 parser
 
@@ -552,64 +412,32 @@ ctest -R autocomplete_test
 - `parse_defs.h`：AST 节点结构体 + `CompOp`/`SqlCommandFlag` 枚举 + `ParsedSqlNode`、`ParsedSqlResult`
 - `parse_stage.*`：`ParseStage::handle_request`
 - `resolve_stage.*`：`ResolveStage::handle_request`
-- `expression_binder.*`：`ExpressionBinder`（10 个 `bind_*` 函数，见 §8.1）、`BinderContext::add_table`
+- `expression_binder.*`：`ExpressionBinder`（`bind_*` 函数，见 §8.1）、`BinderContext::add_table`
+- `expected_tokens.h`：`collect_expected_tokens()`
 - `lex_sql.l` / `yacc_sql.y`：生成 `lex_sql.*`、`yacc_sql.*`（入口见 §6.3、§7.4）
 
-### 16.2 stmt
+### 16.2 autocomplete
 
-- `stmt.h/.cpp`：`Stmt::create_stmt`（分发）、`Stmt::stmt_type_ddl`
-- 各语句：`SelectStmt/InsertStmt/DeleteStmt/UpdateStmt/CreateTableStmt/CreateIndexStmt/DescTableStmt/ExplainStmt/FilterStmt/LoadDataStmt/AnalyzeTableStmt/...` 的 `create`
-- 简单语句头文件：`CalcStmt/ExitStmt/HelpStmt/SetVariableStmt/ShowTablesStmt/TrxBeginStmt/TrxEndStmt` 的 `create`
-
-### 16.3 expr
-
-- `expression.*`：`Expression` 基类 + `StarExpr/UnboundFieldExpr/FieldExpr/ValueExpr/CastExpr/ComparisonExpr/ConjunctionExpr/ArithmeticExpr/UnboundAggregateExpr/AggregateExpr`（函数见 §4.2、§5.3、§9.2、§9.3）
-- `expression_iterator.*`：`ExpressionIterator::iterate_child_expr`
-- `arithmetic_operator.hpp`：算术/比较模板 `AddOperator...Equal...`
-- `aggregator.*`：`Aggregator` + `Sum/Count/Avg/Min/MaxAggregator::accumulate/evaluate`
-- `aggregate_state.*`：`SumState/CountState/AvgState::update/finalize`
-- `aggregate_hash_table.*`：`StandardAggregateHashTable::add_chunk/aggregate` 等
-- `tuple.h`：`Tuple`、`RowTuple::set_record/cell_at`、`JoinedTuple`、`ProjectTuple`、`ValueListTuple`
-- `composite_tuple.*`：`CompositeTuple::add_tuple/cell_at`
-- `expression_tuple.h`：`ExpressionTuple::get_value`
-- `tuple_cell.*`：`TupleCellSpec::equals`
-
-### 16.4 operator
-
-- 基类：`LogicalOperator`（`add_child/add_expressions`）、`PhysicalOperator`（`open/next/close/name/param`）、`OperatorNode`（`find_log_prop/calculate_cost`）
-- 各逻辑/物理算子：见 §11.1
-
-### 16.5 optimizer
-
-- 计划生成：`LogicalPlanGenerator`、`PhysicalPlanGenerator`、`OptimizeStage`（见 §10.1）
-- 重写：`Rewriter`、`ExpressionRewriter`、`PredicatePushdownRewriter`、`PredicateRewriteRule`、`ArithmeticSimplificationRule`、`ConjunctionSimplificationRule`、`ComparisonSimplificationRule`、`PredicateToJoinRewriter`（见 §10.2）
-- Cascades：`Optimizer`、`OptimizerContext`、`Memo`、`Group`、`GroupExpr`、`CostModel`、`implementation_rules`、`tasks/*`（见 §10.5）
-
-### 16.6 executor
-
-- `ExecuteStage`、`CommandExecutor`、`SqlResult`，及各执行器 `CreateTableExecutor/CreateIndexExecutor/DescTableExecutor/LoadDataExecutor/SetVariableExecutor/AnalyzeTableExecutor/ShowTablesExecutor/HelpExecutor/TrxBeginExecutor/TrxEndExecutor` 的 `execute`
-- `LoadDataExecutor::load_data`、`SetVariableExecutor::var_value_to_boolean/get_execution_mode`
-
-### 16.7 plan_cache / query_cache
-
-- `PlanCacheStage`（空实现）
-- `QueryCacheStage::handle_request`
+- `completion_engine.*`：`CompletionEngine::complete`
+- `current_statement_extractor.*`、`sql_text_scanner.*`、`sql_capabilities.*`
+- `grammar_completion_provider.*`、`catalog_completion_provider.*`、`completion_scope.*`
+- `sql_completion_config.*`、`llama_completion_client.*`、`model_context_builder.*`、`model_completion_provider.*`、`model_completion_validator.*`
 
 ---
 
-## 17. 术语表（补充）
+
+## 17. 术语表（编译器层）
 
 | 术语 | 位置 | 说明 |
 | --- | --- | --- |
-| `Stmt` | `stmt/stmt.h` | 语句对象基类，`Stmt::create_stmt()` 工厂分发 |
-| `SqlResult` | `executor/sql_result.*` | 结果集封装 |
-| `ExpressionBinder` | `parser/expression_binder.*` | 表达式/名字绑定器 |
-| `Rewriter` | `optimizer/rewriter.*` | 重写器框架入口 |
-| `Cascades` | `optimizer/cascade/` | 高级优化器框架（代价模型等） |
+| `ParsedSqlNode` / `ParsedSqlResult` | `parser/parse_defs.h` | 语法解析产出的 AST 节点与结果集合 |
+| `ExpressionBinder` | `parser/expression_binder.*` | 表达式 / 名字绑定器（存在性、类型检查） |
+| `expected_tokens` | `parser/expected_tokens.h` | 复用 bison 期望集合，供语法诊断与补全 |
 | `CompletionEngine` | `autocomplete/completion_engine.*` | SQL 输入补全统一入口 |
 | `SqlCapabilities` | `autocomplete/sql_capabilities.*` | 运行时 SQL 能力表（方言门禁） |
 
 ---
+
 
 ## 18. SQL 输入补全规范（新增）
 
@@ -665,6 +493,7 @@ ctest -R autocomplete_test
 
 ---
 
+
 ## 19. 错误与降级契约（补全）
 
 ```
@@ -677,3 +506,4 @@ llama-server timeout     -> 丢弃
 ```
 
 任何情况下：不 crash、不阻塞 SQL 执行、不修改用户 SQL、不自动执行补全。
+
