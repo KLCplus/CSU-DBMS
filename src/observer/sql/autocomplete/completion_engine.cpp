@@ -212,7 +212,14 @@ CompletionResponse CompletionEngine::complete(Db *db, const CompletionRequest &r
   sort_and_trim(response.items, request.max_items == 0 ? 12 : request.max_items);
 
   // 可选模型补全（增强项，失败不影响确定性结果）
-  if (model_ != nullptr && request.want_model_completion && !statement_full.empty()) {
+  // 仅当确定性结果恰好是唯一一个关键字时（如 SEL -> SELECT、FR -> FROM）才跳过模型，
+  // 其余情况（列/表候选、运算符上下文等）都允许模型给出 ghost。
+  bool deterministic_strong = false;
+  if (!partial.empty() && response.items.size() == 1 && response.items.front().kind == CompletionKind::Keyword) {
+    deterministic_strong = true;
+  }
+
+  if (model_ != nullptr && request.want_model_completion && !statement_full.empty() && !deterministic_strong) {
     CompletionContext model_context;
     model_context.statement_prefix = statement_prefix;
     model_context.statement_suffix = statement_suffix;
