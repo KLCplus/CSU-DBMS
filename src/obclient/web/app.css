@@ -9,5 +9,7 @@
 .sql-complete .ci-text{font-weight:600;color:var(--blue,#7aa2f7)}
 .sql-complete .ci-kind{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted,#8b98a8)}
 .sql-complete .ci-detail{margin-left:auto;font-size:11px;color:var(--dim,#6b7684);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sql-ghost{display:none;margin:6px 22px 0;padding:6px 10px;border-left:3px solid var(--blue,#7aa2f7);background:rgba(120,160,255,.10);color:var(--muted,#9aa4b2);font:12px/1.6 var(--mono,monospace);cursor:pointer;border-radius:4px}
+.sql-ghost{display:none;margin:10px 22px 6px;padding:7px 12px;border-left:3px solid var(--blue,#7aa2f7);background:rgba(120,160,255,.10);color:var(--muted,#9aa4b2);font:12px/1.6 var(--mono,monospace);cursor:pointer;border-radius:4px}
 .sql-ghost:hover{background:rgba(120,160,255,.18);color:var(--text,#d8e5ef)}
+.sql-complete .completion-item.ai{background:rgba(120,160,255,.14)}
+.sql-complete .completion-item.ai .ci-kind{color:var(--cyan,#56d4dd)}
