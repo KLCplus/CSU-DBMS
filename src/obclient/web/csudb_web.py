@@ -100,6 +100,17 @@ class Handler(BaseHTTPRequestHandler):
             "script-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
         )
         self.send_header("Cache-Control", "no-store")
+        # 允许由 GitHub Pages 等外部来源加载的前端跨域调用本 API（使用 X-CSUDB-Session 头，不依赖 Cookie）
+        origin = self.headers.get("Origin")
+        self.send_header("Access-Control-Allow-Origin", origin if origin else "*")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-CSUDB-Session")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Vary", "Origin")
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self._security_headers()
+        self.end_headers()
 
     def _send_json(self, status: int, value: dict, cookie: str | None = None) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
