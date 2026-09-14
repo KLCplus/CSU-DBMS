@@ -1,3 +1,0 @@
-coreDump:
-  enabled: true
-image: oceanbase/miniob:latest
