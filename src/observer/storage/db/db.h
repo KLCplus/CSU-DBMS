@@ -24,7 +24,6 @@ See the Mulan PSL v2 for more details. */
 #include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/clog/disk_log_handler.h"
 #include "storage/os/buffer/double_write_buffer.h"
-#include "oblsm/include/ob_lsm.h"
 
 class Table;
 class LogHandler;
@@ -57,7 +56,7 @@ public:
    * @param name   数据库名称
    * @param dbpath 当前数据库放在哪个目录下
    * @param trx_kit_name 使用哪种类型的事务模型
-   * @param storage_engine 存储引擎，目前只支持heap table 和 lsm-tree 两种
+   * @param storage_engine 存储引擎，目前仅支持 heap table
    * @param buffer_pool_memory_size Buffer Pool 可使用的页面内存字节数
    * @param buffer_pool_replacement_policy 页面替换策略，支持 lru/fifo/clock
    * @param page_io_backend 页文件 I/O 后端，支持 legacy/positional
@@ -111,8 +110,6 @@ public:
 
   string path() const { return path_; }
 
-  oceanbase::ObLsm *lsm() { return lsm_; }
-
 private:
   RC open_schema_catalog();
   RC finish_schema_catalog_bootstrap();
@@ -129,21 +126,6 @@ private:
   /// @brief 初始化数据库的double buffer pool
   RC init_dblwr_buffer();
 
-  StorageEngine get_storage_engine()
-  {
-    StorageEngine engine = StorageEngine::UNKNOWN_ENGINE;
-    if (storage_engine_.length() == 0) {
-      engine = StorageEngine::HEAP;
-    } else if (0 == strcasecmp(storage_engine_.c_str(), "heap")) {
-      engine = StorageEngine::HEAP;
-    } else if (0 == strcasecmp(storage_engine_.c_str(), "lsm")) {
-      engine = StorageEngine::LSM;
-    } else {
-      engine = StorageEngine::UNKNOWN_ENGINE;
-    }
-    return engine;
-  }
-
 private:
   string                         name_;                 ///< 数据库名称
   string                         path_;                 ///< 数据库文件存放的目录
@@ -152,7 +134,6 @@ private:
   unique_ptr<LogHandler>         log_handler_;          ///< 当前数据库的日志处理器
   unique_ptr<TrxKit>             trx_kit_;              ///< 当前数据库的事务管理器
   unique_ptr<SchemaCatalog>      schema_catalog_;       ///< page-backed schema data dictionary
-  oceanbase::ObLsm              *lsm_;                  ///< 当前数据库的 LSM-Tree 存储引擎
 
   /// 给每个table都分配一个ID，用来记录日志。这里假设所有的DDL都不会并发操作，所以相关的数据都不上锁
   int32_t next_table_id_ = 0;
@@ -161,5 +142,4 @@ private:
   vector<Table *> legacy_tables_to_register_;
 
   LSN    check_point_lsn_ = 0;  ///< 当前数据库的检查点LSN。会记录到磁盘中。
-  string storage_engine_;
 };

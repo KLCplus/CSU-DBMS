@@ -128,7 +128,7 @@ void usage(const char *program)
   cout << "  -r, --replacement POLICY   lru, fifo, or clock" << endl;
   cout << "      --io-backend BACKEND   legacy or positional" << endl;
   cout << "  -d, --durable              Enable disk durability" << endl;
-  cout << "  -E, --engine ENGINE        heap or lsm" << endl;
+  cout << "  -E, --engine ENGINE        heap" << endl;
   cout << endl;
   cout << "Default data directory: " << the_process_param()->data_dir() << endl;
   cout << "Override precedence: --data-dir > CSUDB_DATA_DIR > XDG_STATE_HOME > ~/.local/state/csudb" << endl;
