@@ -79,6 +79,15 @@ RC UpdatePhysicalOperator::open(Trx *trx)
   }
 
   // 持续消费 child 并先收集全部匹配记录，保证多行 UPDATE 且避免扫描器被页内更新破坏。
+  const TableMeta &table_meta = table_->table_meta();
+  int              field_index = -1;
+  for (int i = 0; i < table_meta.field_num(); i++) {
+    if (table_meta.field(i) == field_meta_) {
+      field_index = i;
+      break;
+    }
+  }
+
   for (Record &old_record : records_) {
     Record new_record;
     rc = new_record.copy_data(old_record.data(), old_record.len());
@@ -88,13 +97,26 @@ RC UpdatePhysicalOperator::open(Trx *trx)
     }
     new_record.set_rid(old_record.rid());
 
-    // 将字段的新值写入新记录对应位置
-    size_t copy_len = field_meta_->len();
-    if (field_meta_->type() == AttrType::CHARS) {
-      memset(new_record.data() + field_meta_->offset(), 0, field_meta_->len());
-      copy_len = std::min(static_cast<size_t>(field_meta_->len()), static_cast<size_t>(value_.length()));
+    // 同步维护 NULL 位图，否则原值为 NULL 的字段更新后仍会被读成 NULL
+    if (field_index >= 0) {
+      char *bitmap = new_record.data() + table_meta.null_bitmap_offset();
+      if (value_.is_null()) {
+        bitmap[field_index / 8] |= static_cast<char>(1 << (field_index % 8));
+        memset(new_record.data() + field_meta_->offset(), 0, field_meta_->len());
+      } else {
+        bitmap[field_index / 8] &= static_cast<char>(~(1 << (field_index % 8)));
+      }
     }
-    memcpy(new_record.data() + field_meta_->offset(), value_.data(), copy_len);
+
+    if (!value_.is_null()) {
+      // 将字段的新值写入新记录对应位置
+      size_t copy_len = field_meta_->len();
+      if (field_meta_->type() == AttrType::CHARS) {
+        memset(new_record.data() + field_meta_->offset(), 0, field_meta_->len());
+        copy_len = std::min(static_cast<size_t>(field_meta_->len()), static_cast<size_t>(value_.length()));
+      }
+      memcpy(new_record.data() + field_meta_->offset(), value_.data(), copy_len);
+    }
 
     rc = trx_->update_record(table_, old_record, new_record);
     if (rc != RC::SUCCESS) {

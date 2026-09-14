@@ -30,6 +30,7 @@ enum class ClientRequestType
   PING,
   SERVER_INFO,
   BUFFER_SNAPSHOT,
+  COMPLETE,
 };
 
 /**
@@ -65,6 +66,16 @@ public:
   void set_protocol_error(const string &value) { protocol_error_ = value; }
   const string &protocol_error() const { return protocol_error_; }
 
+  // SQL 输入补全请求
+  void set_completion_sql(const string &value) { completion_sql_ = value; }
+  const string &completion_sql() const { return completion_sql_; }
+  void set_completion_cursor(size_t value) { completion_cursor_ = value; }
+  size_t completion_cursor() const { return completion_cursor_; }
+  void set_completion_max_items(size_t value) { completion_max_items_ = value; }
+  size_t completion_max_items() const { return completion_max_items_; }
+  void set_completion_want_model(bool value) { completion_want_model_ = value; }
+  bool completion_want_model() const { return completion_want_model_; }
+
 private:
   Communicator *communicator_ = nullptr;  ///< 与客户端通讯的对象
   SqlResult     sql_result_;              ///< SQL执行结果
@@ -76,4 +87,8 @@ private:
   string        database_;
   size_t        snapshot_limit_ = 20;
   string        protocol_error_;
+  string        completion_sql_;
+  size_t        completion_cursor_     = 0;
+  size_t        completion_max_items_  = 12;
+  bool          completion_want_model_ = true;
 };

@@ -18,6 +18,8 @@ See the Mulan PSL v2 for more details. */
 #include "common/global_context.h"
 #include "storage/table/table_meta.h"
 #include "storage/trx/trx.h"
+
+#include <strings.h>
 #include "json/json.h"
 
 static const Json::StaticString FIELD_TABLE_ID("table_id");
@@ -165,7 +167,7 @@ const FieldMeta *TableMeta::field(const char *name) const
     return nullptr;
   }
   for (const FieldMeta &field : fields_) {
-    if (0 == strcmp(field.name(), name)) {
+    if (0 == strcasecmp(field.name(), name)) {
       return &field;
     }
   }

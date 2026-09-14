@@ -226,11 +226,17 @@ void Value::set_value(const Value &value)
 void Value::set_string_from_other(const Value &other)
 {
   ASSERT(attr_type_ == AttrType::CHARS, "attr type is not CHARS");
-  if (own_data_ && other.value_.pointer_value_ != nullptr && length_ != 0) {
-    this->value_.pointer_value_ = new char[this->length_ + 1];
-    memcpy(this->value_.pointer_value_, other.value_.pointer_value_, this->length_);
-    this->value_.pointer_value_[this->length_] = '\0';
+  if (!own_data_) {
+    // 不拥有内存，直接共享指针
+    this->value_.pointer_value_ = other.value_.pointer_value_;
+    return;
   }
+  // 拥有内存则需要深拷贝；空串同样分配 1 字节，避免悬空指针
+  this->value_.pointer_value_ = new char[this->length_ + 1];
+  if (this->length_ > 0 && other.value_.pointer_value_ != nullptr) {
+    memcpy(this->value_.pointer_value_, other.value_.pointer_value_, this->length_);
+  }
+  this->value_.pointer_value_[this->length_] = '\0';
 }
 
 char *Value::data() const
@@ -259,7 +265,29 @@ string Value::to_string() const
   return res;
 }
 
-int Value::compare(const Value &other) const { return DataType::type_instance(this->attr_type_)->compare(*this, other); }
+int Value::compare(const Value &other) const
+{
+  // NULL 三值逻辑：NULL 与任何值（含 NULL）比较不应下推到具体类型
+  if (is_null_ || other.is_null_) {
+    if (is_null_ && other.is_null_) {
+      return 0;
+    }
+    return is_null_ ? -1 : 1;
+  }
+
+  // 布尔类型目前没有独立的 DataType 实现，这里直接比较真假值，
+  // 供 NOT（expr == FALSE）等布尔表达式使用。
+  if (attr_type_ == AttrType::BOOLEANS && other.attr_type_ == AttrType::BOOLEANS) {
+    bool left  = value_.bool_value_;
+    bool right = other.value_.bool_value_;
+    if (left == right) {
+      return 0;
+    }
+    return left ? 1 : -1;
+  }
+
+  return DataType::type_instance(this->attr_type_)->compare(*this, other);
+}
 
 int Value::get_int() const
 {
