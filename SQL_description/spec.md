@@ -1,8 +1,8 @@
 # SQL 编译器详细规格说明书（Spec）
 
-- 版本：v2.0（函数级）
-- 日期：2026-09-10
-- 适用范围：`/root/CSU-DBMS`（OceanBase Miniob 改造版，含 CSUDB 产品级存储引擎）
+- 版本：v2.1（函数级）
+- 日期：2026-09-14
+- 适用范围：`/root/CSU-DBMS`（OceanBase Miniob 改造版，含 CSUDB 产品级存储引擎、SQL 输入补全）
 - 上游文档：
   - `SQL_description/requirements.md`（验收需求拆解）
   - `SQL_description/文件结构规划.md`（代码目录与职责划分）
@@ -43,16 +43,20 @@ SQL 文本
 - 系统工程：AST→逻辑计划→物理计划、规则式优化（常量折叠、布尔化简、投影裁剪、谓词下推、冗余节点消除）、JSON 输出。
 - 语义/语法错误必须携带**类型 + 行列位置 + 原因**，且不崩溃。
 
-### 2.2 当前缺口（暂缓项）
+### 2.2 现状与补齐情况
 
-| 缺口 | 状态 | 目标规格所在章节 |
+| 能力 | 状态 | 目标规格所在章节 |
 | --- | --- | --- |
-| 字符串转义 `Tom''s` | ❌ 未实现 | §6.4 |
-| 投影裁剪 / Project[*] 消除 | ❌ 未实现 | §10.3 |
-| 语义错误结构化定位 | ⚠️ 部分 | §8.5 |
-| INSERT 逐列 TypeMismatch 报告 | ⚠️ 部分 | §8.4 |
-| 类型一致性严格校验 | ⚠️ 部分 | §5.3、§8.3 |
-| 语法 `expected:` 期望集合 | ⚠️ 部分 | §7.4 |
+| 字符串转义 `Tom''s` | ✅ 已实现（`''`/`""`/`\x`） | §6.4 |
+| 投影裁剪 / Project[*] 消除 | ✅ 已实现（列裁剪） | §10.3 |
+| 语义错误结构化定位 | ✅ 已实现 | §8.5 |
+| INSERT 逐列 TypeMismatch 报告 | ✅ 已实现（含列清单） | §8.4 |
+| 类型一致性严格校验 | ✅ 已实现 | §5.3、§8.3 |
+| 语法 `expected:` 期望集合 | ✅ 已实现 | §7.4 |
+| SQL 输入自动补全 | ✅ 新增 | §18 |
+| 自动化测试集 | ✅ 新增 | §14 |
+
+> 本版状态：必备能力、进阶能力、词法/语法/语义关键要求均已实现；另修复了词法器缺 `OR`、NOT 优先级、标识符大小写、空字符串崩溃、多余右括号、一元负号、NOT 布尔比较、NULL 分组、UPDATE NULL 位图、OR 谓词下推等基础缺陷。
 
 ### 2.3 非目标
 
@@ -139,7 +143,7 @@ SQL 文本
 | `get_int/get_float/get_string/get_boolean/get_string_t` | 取值（类型不符时触发转换） |
 | `set_int/set_float/set_string/...` | 设值 |
 | `add/subtract/multiply/divide/negative`（静态） | 算术（委托 `DataType::type_instance(...)`） |
-| `compare(other)` | 比较 |
+| `compare(other)` | 比较；内置 NULL 三值逻辑与 `BOOLEANS` 比较（供 NOT 使用） |
 
 ### 5.3 类型推断规则
 
@@ -155,7 +159,7 @@ SQL 文本
 | `ArithmeticExpr` | 由 `calc_value` 结果类型决定 |
 | `AggregateExpr` | `COUNT`→`INTS`；`AVG`→`FLOATS`；否则 `child_->value_type()` |
 
-集中管理的类型规则（目标形态，见 `requirements.md` §语义分析 9）：
+集中管理的类型规则（见 `requirements.md` §语义分析 9，已实现于 `parser/expression_binder.cpp::bind_arithmetic_expression`）：
 
 ```
 INT  +  INT      -> INT
@@ -163,8 +167,10 @@ INT  >  INT      -> BOOL
 VARCHAR = VARCHAR -> BOOL
 BOOL AND BOOL    -> BOOL
 NOT BOOL         -> BOOL
-INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现，落在 ArithmeticExpr::value_type / bind_arithmetic_expression）
+INT  +  VARCHAR  -> ERROR   // 已严格报错：operator '+' cannot be applied to INT and VARCHAR
 ```
+
+错误消息使用面向用户的类型名 `common/type/attr_type.cpp::attr_type_to_sql_string`（`INT/VARCHAR/FLOAT/BOOL/DATE`）。
 
 ---
 
@@ -187,20 +193,21 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 
 - `%x COMMENT`：多行注释 `/* ... */`（`BEGIN(COMMENT)` / `<COMMENT>"*/"`）。
 - 单行注释：`--[^\n]*`。
-- `%x STR`：已声明保留给字符串状态机（**当前未使用**，见 §6.4）。
+- 字符串状态：单/双引号规则直接匹配转义（`''`/`""`/`\x`），`%x STR` 不再需要。
 
 `parser/lex_sql.l` 中的入口/辅助函数：
 
 | 函数 | 说明 |
 | --- | --- |
 | `scan_string(const char*, yyscan_t)` | 绑定输入缓冲（`yy_switch_to_buffer` + `yy_scan_string`） |
-| `YY_USER_ACTION`（宏） | 写 `yylloc` 行列位置 |
-| `yylex`（生成于 `lex_sql.cpp`） | 词法扫描主循环 |
+| `YY_USER_INIT`（宏） | 每次解析初始化 `yylineno = 1; yycolumn = 1;` |
+| `YY_USER_ACTION`（宏） | 写 `yylloc`（1-based 行/列），换行时 `yycolumn` 重置 |
+| `yylex`（生成于 `lex_sql.cpp`） | 词法扫描主循环（`%option yylineno` 跟踪行号、`%option case-insensitive` 折叠关键字） |
 
-### 6.4 目标规格（缺口）
+### 6.4 已实现的行为
 
-- 字符串转义：`'Tom''s'` → `Tom's`（连续单引号表示一个引号），`''` 表示空串。当前 `'[^']*\'` 无法匹配连续引号，需用 `%x STR` 状态实现。
-- 未闭合字符串、非法字符（如 `@`）必须返回词法错误（类型 + 位置 + 原因），不崩溃。
+- 字符串转义：`'Tom''s'` → `Tom's`；`''` 表示空串；`"a""b"` → `a"b`；反斜杠转义 `\x` → `x`。由 `parser/yacc_sql.y::unescape_quoted_string` 完成。
+- 未闭合字符串、非法字符（如 `@`）返回词法/语法错误（类型 + 位置 + 原因），不崩溃。
 
 ---
 
@@ -238,24 +245,28 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 
 | 函数 | 说明 |
 | --- | --- |
-| `yyerror()` | 语法/解析错误回调（写 `ErrorSqlNode` + `line/column`） |
+| `yyerror()` | 语法/解析错误回调（`error: cannot back up` 等回退路径） |
+| `yyreport_syntax_error()` | `%define parse.error custom` 回调：输出 `位置 + unexpected token + expected` 集合；补全模式下收集期望符号 |
+| `collect_expected_tokens()`（`expected_tokens.h`） | 在 SQL 前缀末尾追加哨兵，复用 bison `yypcontext_expected_tokens` 取期望 terminal 集合，供自动补全使用 |
 | `token_name()` | 由 `llocp` 截取 token 原文 |
-| `unescape_quoted_string()` | 字符串转义（`''`→`'`、`\\`→`\`） |
-| `create_arithmetic_expression()` | 构造 `ArithmeticExpr` 并记录行列 |
+| `unescape_quoted_string()` | 字符串转义（`''`→`'`、`""`→`"`、`\\`→`\`） |
+| `create_arithmetic_expression()` | 构造 `ArithmeticExpr` 并记录**运算符**行列 |
 | `create_aggregate_expression()` | 构造 `UnboundAggregateExpr` |
 | `set_expr_name_and_location()` | 为表达式记录名字 + 行列 |
 | `append_join_node()` | 追加 `JoinSqlNode` 到 JOIN 列表 |
 | `parse()`（`parse.h/.cpp`） | 语法解析总入口，`ParsedSqlResult::add_sql_node` 收集节点 |
 
-### 7.5 目标规格（缺口）
+### 7.5 语法诊断（已实现）
 
-- 语法诊断应输出 `错误位置 + 实际符号 + 期望集合`：
-  ```
-  SyntaxError at line 3, column 19
-  unexpected token: ';'
-  expected: IDENTIFIER | CONST | '(' | NOT
-  ```
-  当前通过 `yyerror` + `%define parse.error verbose` 输出部分信息，但缺 `expected:` 期望符号集合（§7.4 的 `yyerror` 尚未生成 expected 集合）。
+语法诊断输出 `错误位置 + 实际符号 + 期望集合`：
+
+```
+SyntaxError at line 3, column 16
+unexpected token: SEMICOLON
+expected: LBRACE | NULL_T | NUMBER | FLOAT | ID | SSS | '-' | '*' | NOT
+```
+
+实现：`%define parse.error custom` + `yyreport_syntax_error`（`yypcontext_token` / `yypcontext_expected_tokens`），错误消息经 `ParseStage::handle_request` 透出；多语句输入中任一条解析失败也会被反馈。
 
 ---
 
@@ -285,26 +296,30 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 - 表存在性：`SelectStmt::create` 通过 `Db::find_table` 查 Catalog。
 - 列存在性：`bind_unbound_field_expression` 查 `TableMeta::find_field`；不存在报语义错误。
 
-### 8.3 类型一致性（部分实现）
+### 8.3 类型一致性（已实现）
 
-- 算术/比较运算的左右操作数类型需满足 §5.3 的类型规则，不满足（如 `INT + VARCHAR`）应报「operator '+' cannot be applied to INT and VARCHAR」。
-- 当前在 `optimizer/logical_plan_generator.cpp` 通过 `LogicalPlanGenerator::implicit_cast_cost` 插 `CastExpr` 做隐式转换，尚未严格区分「可隐式转换」与「必须报错」。
+- 算术/比较运算的左右操作数类型需满足 §5.3 的类型规则，不满足（如 `INT + VARCHAR`）报「operator '+' cannot be applied to INT and VARCHAR」。
+- 实现：`parser/expression_binder.cpp::bind_arithmetic_expression` 校验左右 `value_type()` 是否为数值类型，`set_arithmetic_type_error` 生成带位置的语义错误；
+  算术表达式的行列记录为**运算符位置**（`yacc_sql.y::create_arithmetic_expression`）。
+- `optimizer/logical_plan_generator.cpp::implicit_cast_cost` 仍用于 WHERE 旧路径中可隐式转换的数值类型（`INT`↔`FLOAT`）。
 
-### 8.4 INSERT 匹配（部分实现）
+### 8.4 INSERT 匹配（已实现）
 
-- `stmt/insert_stmt.cpp::InsertStmt::create` 逐个字段校验值与目标列的类型/个数。
-- 允许 `NULL` 写入任何可空列；允许 `CHARS/INTS` 字面量写入 `DATES` 列（由 `Table::make_record` 做转换）。
-- 目标形态（未实现）：逐列结构化报告 `TypeMismatch`：
+- `stmt/insert_stmt.cpp::InsertStmt::create` 支持两种形式：`INSERT INTO t VALUES (...)` 与 `INSERT INTO t(col1,col2) VALUES (...)`（列清单映射、未列出列填 `NULL`）。
+- 逐列校验类型/个数；允许 `NULL` 写入可空列；允许 `CHARS/INTS` 字面量写入 `DATES` 列（由 `Table::make_record` 转换）。
+- 逐列结构化报告 `TypeMismatch`：
   ```
   TypeMismatch:
   student.id expects INT, but VARCHAR found.
   student.name expects VARCHAR, but INT found.
   ```
+- 列清单中列不存在时报 `SemanticError: column 'x' does not exist in table 't'.`
 
-### 8.5 语义错误定位（部分实现）
+### 8.5 语义错误定位（已实现）
 
 - 目标：`SemanticError at line L, column C` + 原因。
-- 现状：表达式已携带行列（`expression.h::set_location/line/column`），但语义错误响应仍以 `RC` 码返回，未结构化输出行列 + 原因。
+- 实现：表达式携带行列（`expr/expression.h::set_location/line/column`）；`parser/expression_binder.cpp` 将结构化消息写入线程本地槽位，
+  `parser/resolve_stage.cpp::ResolveStage::handle_request` 在 `Stmt::create_stmt` 失败时透出该消息；`stmt/insert_stmt.cpp` 复用同一槽位报告 `TypeMismatch`。
 
 ---
 
@@ -354,9 +369,10 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 | 常量折叠 | `ArithmeticSimplificationRule` | `rewrite` | `age > 10+8` → `age > 18` |
 | 布尔化简 | `ConjunctionSimplificationRule` | `rewrite` | `x AND TRUE` → `x` |
 | 比较化简 | `ComparisonSimplificationRule` | `rewrite` | 常量比较化简 |
-| 谓词下推 | `PredicatePushdownRewriter` | `rewrite`、`is_empty_predicate`、`get_exprs_can_pushdown` | 尽量提前过滤 |
-| 冗余节点消除 | `PredicateRewriteRule` | `rewrite` | 消除恒真 Filter 等（部分） |
+| 谓词下推 | `PredicatePushdownRewriter` | `rewrite`、`is_empty_predicate`、`get_exprs_can_pushdown` | 尽量提前过滤（OR 保留在 Predicate 执行） |
+| 冗余节点消除 | `PredicateRewriteRule` | `rewrite` | 消除恒真/恒假 Filter |
 | 谓词转 JOIN | `PredicateToJoinRewriter` | — | 隐式 JOIN → 显式 JOIN |
+| 投影裁剪 | `ProjectionPruningRule` | `rewrite` | 只保留查询真正需要的列 |
 
 框架与执行入口：
 
@@ -365,10 +381,14 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 | `Rewriter` | `rewrite` | 重写器入口 |
 | `ExpressionRewriter` | `rewrite`、`rewrite_expression` | 表达式自底向上重写 |
 
-### 10.3 投影裁剪（缺口）
+### 10.3 投影裁剪（已实现）
 
-- 目标：仅保留查询真正需要的列；`Project[*]` / 恒真 `Filter` 可直接消除。
-- 现状：未实现对应重写规则。
+- 目标：仅保留查询真正需要的列。
+- 实现：`optimizer/projection_pruning_rule.cpp::ProjectionPruningRule::rewrite` 在 Projection 节点收集整棵子树引用到的字段
+  （含 WHERE/ORDER BY/GROUP BY/JOIN/聚合/下推谓词），按表定义顺序写入 `TableGetLogicalOperator::set_used_fields`；
+  物理计划据此只让 `TableScanPhysicalOperator` 输出这些列（`set_used_fields`）。
+- `expr/tuple.h::RowTuple::cell_at` 在裁剪后按字段原始下标访问 NULL 位图，保证 NULL 语义正确。
+- 恒真 `Filter` 由 `PredicateRewriteRule` 消除；向量化路径与索引扫描路径保守地不裁剪（返回全字段，正确性不受影响）。
 
 ### 10.4 计划可视化 / EXPLAIN
 
@@ -462,6 +482,17 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 | 语义错误 | 表/列不存在、类型不匹配 |
 | 边界测试 | 空输入、极长标识符、多语句、大小写 |
 | 自建测试集 | 覆盖上述全部能力 |
+| 补全测试 | 关键字/表/列/INSERT 补全、方言门禁、注释/字符串/多语句/大小写 |
+
+自动化测试集位置：`SQL_description/test/`（`run_tests.py` + `cases/{lexer,parser,semantic,core_sql,boundary,autocomplete}.py`）；
+补全单元测试：`unittest/observer/autocomplete_test.cpp`。运行方式：
+
+```bash
+./build.sh debug --make -j4
+python3 SQL_description/test/run_tests.py            # 自动拉起临时 csudbd
+python3 SQL_description/test/run_tests.py --filter autocomplete
+ctest -R autocomplete_test
+```
 
 ### 14.2 关键验收用例（节选）
 
@@ -500,12 +531,14 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 | 常量折叠 | ✅ | `optimizer/arithmetic_simplification_rule.cpp::ArithmeticSimplificationRule::rewrite` |
 | 布尔化简 | ✅ | `optimizer/conjunction_simplification_rule.cpp::ConjunctionSimplificationRule::rewrite` |
 | 谓词下推 | ✅ | `optimizer/predicate_pushdown_rewriter.cpp::PredicatePushdownRewriter::rewrite` |
-| 字符串转义 `Tom''s` | ❌ | `parser/lex_sql.l`（`%x STR` 未使用） |
-| 投影裁剪 / Project[*] 消除 | ❌ | 未实现 |
-| 语义错误定位 | ⚠️ | `expr/expression.h::set_location/line/column`（响应仍为 RC 码） |
-| INSERT 逐列 TypeMismatch | ⚠️ | `stmt/insert_stmt.cpp::InsertStmt::create` |
-| 类型一致性严格校验 | ⚠️ | `optimizer/logical_plan_generator.cpp`（`implicit_cast_cost` 隐式转换） |
-| 语法 `expected:` 集合 | ⚠️ | `parser/yacc_sql.y::yyerror` + `%define parse.error verbose` |
+| 字符串转义 `Tom''s` | ✅ | `parser/lex_sql.l`（字符串规则）、`parser/yacc_sql.y::unescape_quoted_string` |
+| 投影裁剪 / Project[*] 消除 | ✅ | `optimizer/projection_pruning_rule.cpp::ProjectionPruningRule::rewrite` |
+| 语义错误定位 | ✅ | `parser/expression_binder.cpp`（消息槽）、`parser/resolve_stage.cpp` |
+| INSERT 逐列 TypeMismatch | ✅ | `stmt/insert_stmt.cpp::InsertStmt::create` |
+| 类型一致性严格校验 | ✅ | `parser/expression_binder.cpp::bind_arithmetic_expression` |
+| 语法 `expected:` 集合 | ✅ | `parser/yacc_sql.y::yyreport_syntax_error` + `%define parse.error custom` |
+| SQL 输入补全 | ✅ | `sql/autocomplete/*`、`service/database_service.cpp::complete_sql`、`obclient/client.cpp` |
+| 自动化测试集 | ✅ | `SQL_description/test/`、`unittest/observer/autocomplete_test.cpp` |
 
 ---
 
@@ -573,3 +606,71 @@ INT  +  VARCHAR  -> ERROR   // 需严格报错（当前为 ⚠️ 部分实现�
 | `ExpressionBinder` | `parser/expression_binder.*` | 表达式/名字绑定器 |
 | `Rewriter` | `optimizer/rewriter.*` | 重写器框架入口 |
 | `Cascades` | `optimizer/cascade/` | 高级优化器框架（代价模型等） |
+| `CompletionEngine` | `autocomplete/completion_engine.*` | SQL 输入补全统一入口 |
+| `SqlCapabilities` | `autocomplete/sql_capabilities.*` | 运行时 SQL 能力表（方言门禁） |
+
+---
+
+## 18. SQL 输入补全规范（新增）
+
+### 18.1 目标与边界
+
+- 只做「用户输入 SQL 命令时的自动补全」，不做 NL2SQL / 聊天 / C++ 代码补全。
+- **不让 LLM 决定 SQL 是否合法**；关键字来自 Parser，表/列来自 Catalog。
+- **不引入第二套 SQL Parser**：复用 `%define parse.error custom` 的期望集合（`collect_expected_tokens`）。
+- 模型是增强项：不可用/超时/校验失败时确定性补全照常工作，不阻塞、不报错。
+
+### 18.2 数据结构（`autocomplete/completion_types.h`）
+
+| 类型 | 关键字段 |
+| --- | --- |
+| `CompletionItem` | `insert_text / display_text / kind / source / replace_start / replace_end / score / detail` |
+| `CompletionRequest` | `sql / cursor_offset / max_items / want_model_completion` |
+| `CompletionResponse` | `items / ghost_text / model_used` |
+| `CompletionKind` | `Keyword / Table / Column / Alias / Operator / Type / Literal / Snippet / Model` |
+| `CompletionSource` | `Grammar / Catalog / Semantic / Model` |
+
+### 18.3 确定性补全流程（`CompletionEngine::complete`）
+
+1. `find_statement_at_cursor` 取光标所在单条语句（分号只在字符串/注释外分隔）。
+2. `cursor_in_string_or_comment` 命中则直接返回空（不调用模型）。
+3. 计算光标处半截 token（`partial`）与 `statement_prefix`。
+4. `collect_expected_tokens(statement_prefix + 哨兵)` 取期望 terminal 集合；若哨兵前已确定语法错误则返回空（避免误导）。
+5. `complete_grammar`：把期望符号映射为关键字/运算符/类型；并用**同一个 Parser 试探**确认续写关键字（`SELECT * FROM t ` → `WHERE/GROUP/ORDER/JOIN` 等）。关键字大小写跟随用户语句风格。
+6. `complete_catalog`：`FROM/JOIN/INSERT INTO` 后给表；`SELECT/WHERE/ON/GROUP/ORDER` 给 scope 列；`INSERT INTO t(` 给列；`t.` 给限定列；`CREATE TABLE` 给真实类型。
+7. 按 `score`（试探确认关键字 > Catalog > 期望集合）+ 名称排序、去重、截断到 `max_items`。
+8. 可选模型：`ModelCompletionProvider` 生成 ghost text，经 `ModelCompletionValidator` 校验后返回。
+
+### 18.4 能力门禁（`SqlCapabilities`）
+
+- 只登记 grammar 中真实存在的 terminal 与 executor 已实现的语句；`table_alias = false`（当前 grammar 不支持 `FROM t a`）。
+- 禁止项（`is_forbidden`）包括 `HAVING/LIMIT/OFFSET/UNION/INTERSECT/DISTINCT/ALTER/WITH/窗口/子查询关键字/` 以及项目未使用类型（如 `VARCHAR/TEXT/DECIMAL/...`）。确定性补全与模型输出都受其约束。
+
+### 18.5 模型侧（可选）
+
+- 推理：`llama.cpp` `/infill`，模型 `Qwen/Qwen2.5-Coder-1.5B`（Base，非 Instruct），GGUF `Q8_0`。
+- 上下文：`SqlModelContextBuilder` 生成 `dialect.sql` + 相关 `schema.sql`（受 `max_schema_tables/columns` 预算约束）。
+- 客户端：`LlamaCompletionClient`（`health` 带 TTL、HTTP deadline、失败静默）；超时/不可用丢弃。
+- 校验：`ModelCompletionValidator::validate` = 清洗（去掉 Markdown 围栏/FIM 特殊 token/解释性前缀）→ 长度限制 → 方言白名单截断 → Parser 校验（最长合法前缀）→ Catalog 校验（`t.c` 必须存在）。
+- P40：CUDA 12.x / `CMAKE_CUDA_ARCHITECTURES=61` / `GGML_CUDA_FORCE_MMQ=ON`；见 `scripts/build_llama_p40.sh`、`scripts/run_sql_completion_model.sh`。
+
+### 18.6 协议与客户端
+
+- native 协议新增 `complete` 请求：`{type, sql, cursor, max_items, want_model}`；响应用通用结果结构承载候选（8 列行）与 `attributes.ghost_text/model_used`。
+- 客户端 `obclient/client.cpp`：replxx Tab 触发确定性补全、ghost text hint；`--complete "SQL"` 与 `/complete SQL` 用于演示。
+- 配置：`etc/sql_completion.json`（`enabled/model_enabled/llama_base_url/timeout/max_*` 等），支持环境变量 `CSUDB_SQL_COMPLETION_CONFIG`。
+
+---
+
+## 19. 错误与降级契约（补全）
+
+```
+Parser completion 出错   -> 返回 Catalog 基础 prefix match
+Catalog completion 出错  -> 返回 Grammar keyword
+llama-server down        -> 不显示 ghost text
+llama-server timeout     -> 丢弃
+模型输出 invalid          -> 丢弃或 longest-valid-prefix
+所有 provider 都失败      -> 返回空列表
+```
+
+任何情况下：不 crash、不阻塞 SQL 执行、不修改用户 SQL、不自动执行补全。
