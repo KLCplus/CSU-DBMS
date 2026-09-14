@@ -8,6 +8,7 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 
 - [`docs/components/PRODUCT_INTERFACES.md`](docs/components/PRODUCT_INTERFACES.md)：CLI、Web、Native 服务、Python 与 JDBC。
 - [`docs/components/OS_STORAGE.md`](docs/components/OS_STORAGE.md)：Page、Buffer Pool、替换策略、I/O、诊断与持久化。
+- [`docs/components/IMPLEMENTATION_WALKTHROUGH.md`](docs/components/IMPLEMENTATION_WALKTHROUGH.md)：外观与 OS 源码的函数说明、数据流和使用流程。
 
 
 快速启动：
@@ -99,6 +100,35 @@ SQL 前端对应编译原理，计划与执行对应数据库系统，页、缓�
 其余 benchmark 保留，因为覆盖 B+Tree、Record、并发及执行性能，适合后续高级实验。`src/oblsm/` 也保留，因为 `observer_static` 当前直接链接 `oblsm`，并且 `Db::init` 会初始化 LSM 实例。
 
 ## 3. 项目目录总览
+
+```text
+CSU-DBMS/
+├── src/
+│   ├── observer/              csudbd 服务端与数据库内核
+│   │   ├── sql/               Parser、Stmt、Plan、Optimizer、Executor
+│   │   ├── service/           DatabaseService 与 QueryResult
+│   │   ├── net/               网络与 Native/plain/MySQL/CLI 协议
+│   │   ├── session/           用户、当前数据库与事务上下文
+│   │   └── storage/
+│   │       ├── db/table/record/index/   数据库存储对象
+│   │       └── os/             Page、Frame、Buffer、替换、I/O、诊断
+│   ├── obclient/              csudb CLI、Web 启动器与 Web 页面
+│   ├── common/                配置、日志、终端 UI 和公共工具
+│   └── oblsm/                 可选 LSM 后端
+├── sdk/
+│   ├── python/                Python 驱动
+│   └── java/                  JDBC 驱动
+├── examples/                  SQL、Python 和 Java 示例
+├── etc/                       csudbd 配置
+├── scripts/                   安装、卸载和运维脚本
+├── test/                      集成测试
+├── unittest/                  单元测试
+├── benchmark/                 性能与并发实验
+└── docs/
+    ├── components/            产品外观与 OS 统一源码说明
+    ├── course/                课程架构、语法、源码地图与实验记录
+    └── product/               CLI、Web、SDK 用户文档
+```
 
 | 路径 | 作用 | 阅读建议 |
 | --- | --- | --- |
