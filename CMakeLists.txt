@@ -187,6 +187,13 @@ INSTALL(FILES src/obclient/README.md DESTINATION share/csudb/docs OPTIONAL)
 INSTALL(FILES src/observer/storage/os/README.md
     src/observer/storage/os/os_source_guide.md DESTINATION share/csudb/docs/os OPTIONAL)
 INSTALL(FILES etc/csudb.ini etc/csudb-client.toml DESTINATION share/csudb/examples)
+INSTALL(PROGRAMS examples/python_client.py DESTINATION share/csudb/examples)
+INSTALL(FILES examples/README.md examples/JdbcExample.java DESTINATION share/csudb/examples)
+INSTALL(DIRECTORY sdk/java DESTINATION share/csudb/sdk
+    PATTERN "build" EXCLUDE
+    PATTERN ".gitignore" EXCLUDE)
+INSTALL(FILES sdk/java/build/csudb-jdbc-2026.1.0.jar
+    DESTINATION share/csudb/sdk/java OPTIONAL)
 INSTALL(FILES scripts/completion/csudb.bash DESTINATION share/bash-completion/completions RENAME csudb)
 
 IF (WITH_BENCHMARK)

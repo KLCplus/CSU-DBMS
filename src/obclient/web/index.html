@@ -1,134 +1,23 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>CSUDB 2026 · Web Console</title>
-  <style>
-    :root{--bg:#091019;--panel:#101b28;--panel2:#142335;--line:#26384d;--text:#eaf2fb;--muted:#8fa4bb;--cyan:#37d5d0;--blue:#5797ff;--green:#57d38c;--amber:#f8ba55;--red:#ff6b7a}
-    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 80% 0,#132b41 0,transparent 34%),var(--bg);color:var(--text);font:14px/1.45 Inter,ui-sans-serif,system-ui,sans-serif}
-    button,input,textarea,select{font:inherit} button{cursor:pointer}
-    .topbar{height:64px;display:flex;align-items:center;gap:18px;padding:0 25px;border-bottom:1px solid var(--line);background:#0c1520dd;backdrop-filter:blur(12px);position:sticky;top:0;z-index:4}
-    .brand{font-size:20px;font-weight:800;letter-spacing:.5px}.brand b{color:var(--cyan)}.tag{color:var(--muted);border-left:1px solid var(--line);padding-left:18px}
-    .live{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--green)}.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 12px currentColor}
-    .logout{border:1px solid var(--line);background:transparent;color:var(--muted);padding:7px 12px;border-radius:8px}
-    .layout{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:calc(100vh - 64px)}
-    aside{border-right:1px solid var(--line);padding:20px;background:#0b141e}.navtitle{font-size:11px;letter-spacing:1.5px;color:var(--muted);margin:8px 7px 10px}
-    .nav{display:flex;flex-direction:column;gap:4px}.nav button{border:0;background:transparent;color:var(--muted);text-align:left;padding:10px 12px;border-radius:8px}.nav button.active,.nav button:hover{background:var(--panel2);color:var(--text)}
-    .database-list,.table-list{display:flex;flex-direction:column;gap:4px;max-height:190px;overflow:auto}.database-list button,.table-list button{border:0;background:transparent;text-align:left;color:var(--muted);padding:7px 10px;border-radius:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .database-list button:hover,.table-list button:hover{color:var(--cyan);background:#132536}.database-list button.selected{color:var(--cyan)}
-    main{padding:25px;min-width:0}.page{display:none}.page.active{display:block}.heading{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px}.heading h1{font-size:25px;margin:0}.heading p{margin:4px 0 0;color:var(--muted)}
-    .refresh{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 13px;border-radius:8px}
-    .cards{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:14px}.card,.panel{background:linear-gradient(145deg,#132231,#0e1925);border:1px solid var(--line);border-radius:13px;box-shadow:0 16px 40px #0002}
-    .card{padding:17px}.label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.8px}.value{font-size:25px;font-weight:750;margin-top:8px}.sub{font-size:12px;color:var(--muted);margin-top:3px}
-    .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}.panel{padding:18px}.panel h2{font-size:15px;margin:0 0 15px}
-    .donutrow{display:flex;align-items:center;gap:28px}.donut{width:145px;height:145px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--cyan) 0deg,#233446 0deg)}.donut:after{content:"";width:103px;height:103px;background:var(--panel);border-radius:50%}.donutlabel{position:absolute;text-align:center}.donutlabel strong{display:block;font-size:25px}.donutwrap{position:relative;display:grid;place-items:center}
-    .bars{flex:1}.bar{margin:12px 0}.barhead{display:flex;justify-content:space-between;color:var(--muted);font-size:12px}.track{height:8px;background:#223246;border-radius:8px;margin-top:6px;overflow:hidden}.fill{height:100%;border-radius:8px;background:var(--blue);min-width:2px}
-    .architecture{display:flex;gap:7px;align-items:center;overflow:auto;padding-bottom:5px}.node{background:#17283a;border:1px solid #2e455c;padding:10px 12px;border-radius:9px;white-space:nowrap}.arrow{color:var(--cyan)}
-    .frame-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(32px,1fr));gap:5px}.frame{height:34px;border-radius:5px;background:#21334a;border:1px solid #31465f;display:grid;place-items:center;font-size:10px;color:var(--muted)}.frame.dirty{background:#5b4523;border-color:#bd8730;color:#ffe3a7}.frame.pinned{outline:2px solid var(--red)}.frame.free{opacity:.35}
-    .legend{display:flex;gap:16px;margin:12px 0;color:var(--muted);font-size:12px}.swatch{display:inline-block;width:10px;height:10px;border-radius:2px;background:#21334a;margin-right:5px}.swatch.dirty{background:#9c6b23}.swatch.pinned{background:var(--red)}
-    .sqlbox{width:100%;min-height:155px;resize:vertical;background:#08121c;border:1px solid var(--line);border-radius:10px;color:#d8eaff;padding:14px;font:14px/1.6 ui-monospace,SFMono-Regular,monospace;outline:none}.sqlbox:focus{border-color:var(--cyan)}
-    .actions{display:flex;gap:9px;margin-top:10px}.primary{border:0;background:linear-gradient(90deg,var(--cyan),#4ca5ff);color:#05121a;font-weight:700;padding:9px 16px;border-radius:8px}.secondary{border:1px solid var(--line);background:var(--panel2);color:var(--text);padding:9px 14px;border-radius:8px}
-    .result{overflow:auto;max-height:420px;margin-top:14px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--cyan);position:sticky;top:0;background:#11202e}td{color:#cfdae6}
-    .message{padding:12px;border-radius:8px;background:#122638;color:var(--muted)}.message.error{background:#351a22;color:#ff9ba5}.statusline{margin-left:auto;color:var(--muted)}
-    .login{position:fixed;inset:0;background:radial-gradient(circle at 50% 15%,#183b55,#081019 55%);display:grid;place-items:center;z-index:10}.login.hidden{display:none}.loginbox{width:min(420px,calc(100vw - 35px));padding:30px;background:#101d2a;border:1px solid #2c4358;border-radius:18px;box-shadow:0 30px 100px #0008}.loginbox h1{font-size:28px;margin:0}.loginbox h1 b{color:var(--cyan)}.loginbox p{color:var(--muted);margin:5px 0 22px}.field{margin:12px 0}.field label{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}.field input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#09141f;color:var(--text);outline:none}.field input:focus{border-color:var(--cyan)}.loginerr{min-height:21px;color:var(--red);margin-top:8px}
-    @media(max-width:950px){.cards{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}@media(max-width:680px){.layout{grid-template-columns:1fr}aside{display:none}main{padding:16px}.cards{grid-template-columns:1fr 1fr}.tag{display:none}}
-  </style>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>CSUDB 2026 · Database Management Console</title>
+  <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div class="login" id="login">
-    <form class="loginbox" id="login-form">
-      <h1><b>CSU</b>DB 2026</h1><p>Local Database Observatory</p>
-      <div class="field"><label>User</label><input id="user" value="root" autocomplete="username"></div>
-      <div class="field"><label>Password</label><input id="password" type="password" autocomplete="current-password" autofocus></div>
-      <div class="field"><label>Database</label><input id="database" value="sys"></div>
-      <button class="primary" type="submit">Connect to CSUDB</button>
-      <div class="loginerr" id="login-error"></div>
-    </form>
-  </div>
-
-  <header class="topbar"><div class="brand"><b>CSU</b>DB</div><div class="tag">Compiler · Database · Operating System</div><div class="live"><span class="dot"></span><span id="endpoint">LOCAL WEB</span></div><button class="logout" id="logout">Logout</button></header>
-  <div class="layout">
-    <aside>
-      <div class="navtitle">OBSERVE</div>
-      <div class="nav">
-        <button class="active" data-page="overview">◫ &nbsp;Overview</button>
-        <button data-page="storage">▦ &nbsp;Buffer & Pages</button>
-        <button data-page="query">⌁ &nbsp;SQL Workspace</button>
-      </div>
-      <div class="navtitle">DATABASES</div><div class="database-list" id="databases"></div>
-      <div class="navtitle">TABLES</div><div class="table-list" id="tables"></div>
-    </aside>
-    <main>
-      <section class="page active" id="page-overview">
-        <div class="heading"><div><h1>System overview</h1><p>Live values from DatabaseService and BufferPoolSnapshot.</p></div><button class="refresh" id="refresh">Refresh</button></div>
-        <div class="cards">
-          <div class="card"><div class="label">Server</div><div class="value" id="v-version">—</div><div class="sub" id="v-user">Not connected</div></div>
-          <div class="card"><div class="label">Page requests</div><div class="value" id="v-requests">0</div><div class="sub" id="v-policy">Policy —</div></div>
-          <div class="card"><div class="label">Cache hits</div><div class="value" id="v-hits">0</div><div class="sub" id="v-misses">0 misses</div></div>
-          <div class="card"><div class="label">Disk I/O</div><div class="value" id="v-io">0 / 0</div><div class="sub">reads / writes</div></div>
-        </div>
-        <div class="grid2">
-          <div class="panel"><h2>Cache effectiveness</h2><div class="donutrow"><div class="donutwrap"><div class="donut" id="hit-donut"></div><div class="donutlabel"><strong id="hit-rate">0%</strong><span class="sub">hit rate</span></div></div><div class="bars" id="buffer-bars"></div></div></div>
-          <div class="panel"><h2>Database execution path</h2><div class="architecture"><span class="node">SQL</span><span class="arrow">→</span><span class="node">Compiler</span><span class="arrow">→</span><span class="node">Plan</span><span class="arrow">→</span><span class="node">Executor</span><span class="arrow">→</span><span class="node">Record</span><span class="arrow">→</span><span class="node">Buffer</span><span class="arrow">→</span><span class="node">Disk</span></div><p class="sub">The Web Console never bypasses this path. Every query travels over the Native protocol into the same SQLTaskHandler used by the CLI.</p></div>
-        </div>
-        <div class="panel" style="margin-top:14px"><h2>Frame map</h2><div class="legend"><span><i class="swatch"></i>clean</span><span><i class="swatch dirty"></i>dirty</span><span><i class="swatch pinned"></i>pinned outline</span></div><div class="frame-grid" id="frame-grid"></div></div>
-      </section>
-
-      <section class="page" id="page-storage">
-        <div class="heading"><div><h1>Buffer Pool & Pages</h1><p>Read-only page/frame diagnostics; no internal pointers cross the API.</p></div><button class="refresh" data-refresh>Refresh</button></div>
-        <div class="cards">
-          <div class="card"><div class="label">Capacity</div><div class="value" id="s-capacity">0</div><div class="sub">frames × 8 KiB</div></div>
-          <div class="card"><div class="label">Used</div><div class="value" id="s-used">0</div></div>
-          <div class="card"><div class="label">Pinned</div><div class="value" id="s-pinned">0</div></div>
-          <div class="card"><div class="label">Dirty</div><div class="value" id="s-dirty">0</div></div>
-        </div>
-        <div class="panel result"><table id="pages-table"></table></div>
-      </section>
-
-      <section class="page" id="page-query">
-        <div class="heading"><div><h1>SQL workspace</h1><p id="current-db">Database: sys</p></div></div>
-        <div class="panel">
-          <textarea class="sqlbox" id="sql">SELECT * FROM student;</textarea>
-          <div class="actions"><button class="primary" id="run">Run query</button><button class="secondary" id="show-tables">SHOW TABLES</button><span class="statusline" id="query-time"></span></div>
-          <div class="result" id="result"><div class="message">Run a query or select a table from the sidebar.</div></div>
-        </div>
-      </section>
-    </main>
-  </div>
-  <script>
-    const $=id=>document.getElementById(id);
-    let statusData={}, pageRows=[];
-    async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options});const data=await response.json();if(!response.ok||data.success===false)throw new Error(data.error?.message||data.message||'Request failed');return data}
-    function post(path,body){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
-    function setText(id,value){$(id).textContent=value??'—'}
-    function number(value){return Number(String(value??0).replace(/[^0-9.-]/g,''))||0}
-    function makeTable(target,columns,rows){target.textContent='';const head=document.createElement('thead'),hr=document.createElement('tr');columns.forEach(c=>{const th=document.createElement('th');th.textContent=c.name||c;hr.appendChild(th)});head.appendChild(hr);target.appendChild(head);const body=document.createElement('tbody');rows.forEach(row=>{const tr=document.createElement('tr');row.forEach(cell=>{const td=document.createElement('td');td.textContent=cell;tr.appendChild(td)});body.appendChild(tr)});target.appendChild(body)}
-    function renderResult(data){const box=$('result');box.textContent='';if(!data.columns?.length){const msg=document.createElement('div');msg.className='message';msg.textContent=(data.message||'Query OK')+(data.affected_rows!=null?', '+data.affected_rows+' rows affected':'');box.appendChild(msg)}else{const table=document.createElement('table');makeTable(table,data.columns,data.rows||[]);box.appendChild(table)}setText('query-time',((data.execution_time_us||0)/1000).toFixed(3)+' ms')}
-    function bar(label,value,total,color){const pct=total?Math.min(100,value*100/total):0;return '<div class="bar"><div class="barhead"><span>'+label+'</span><span>'+value+' / '+total+'</span></div><div class="track"><div class="fill" style="width:'+pct+'%;background:'+color+'"></div></div></div>'}
-    function renderStatus(data){
-      const a=data.status.attributes||{},p=data.pages,a2=p.attributes||{};statusData=a;pageRows=p.rows||[];
-      setText('v-version',a.version||'2026.1.0');setText('v-user',(a.user||'')+' @ '+(a.database||'sys'));setText('v-requests',a.requests||0);setText('v-policy',(a.replacement_policy||'—').toUpperCase()+' · '+(a.io_backend||'—'));setText('v-hits',a.hits||0);setText('v-misses',(a.misses||0)+' misses');setText('v-io',(a.disk_reads||0)+' / '+(a.disk_writes||0));
-      const rate=number(a.hit_rate);setText('hit-rate',rate.toFixed(1)+'%');$('hit-donut').style.background='conic-gradient(var(--cyan) '+(rate*3.6)+'deg,#233446 0deg)';
-      const capacity=number(a.buffer_pool_frames),used=number(a.buffer_pool_used),pinned=number(a.buffer_pool_pinned),dirty=number(a.buffer_pool_dirty);
-      $('buffer-bars').innerHTML=bar('Used frames',used,capacity,'var(--blue)')+bar('Pinned frames',pinned,capacity,'var(--red)')+bar('Dirty frames',dirty,capacity,'var(--amber)');
-      setText('s-capacity',capacity);setText('s-used',used);setText('s-pinned',pinned);setText('s-dirty',dirty);setText('current-db','Database: '+(a.database||'sys'));
-      const grid=$('frame-grid');grid.textContent='';pageRows.forEach(r=>{const f=document.createElement('div');f.className='frame'+(r[4]==='yes'?' dirty':'')+(number(r[3])>0?' pinned':'');f.textContent=r[2];f.title='Frame '+r[0]+' · page '+r[2]+' · pins '+r[3];grid.appendChild(f)});
-      makeTable($('pages-table'),p.columns||[],pageRows);
-    }
-    async function refresh(){try{renderStatus(await api('/api/status'));await loadDatabases();await loadTables()}catch(error){if(String(error).includes('login required'))$('login').classList.remove('hidden')}}
-    async function loadDatabases(){const data=await api('/api/databases'),box=$('databases');box.textContent='';(data.rows||[]).forEach(r=>{const name=r[0],b=document.createElement('button');b.textContent='◉ '+name;if(name===statusData.database)b.className='selected';b.onclick=async()=>{await post('/api/use',{database:name});await refresh()};box.appendChild(b)})}
-    async function loadTables(){const data=await api('/api/tables'),box=$('tables');box.textContent='';(data.rows||[]).forEach(r=>{const name=r[0],b=document.createElement('button');b.textContent='▤ '+name;b.onclick=async()=>{showPage('query');$('sql').value='SELECT * FROM '+name+';';renderResult(await api('/api/table?name='+encodeURIComponent(name)))};box.appendChild(b)})}
-    function showPage(name){document.querySelectorAll('.page').forEach(e=>e.classList.remove('active'));document.querySelectorAll('.nav button').forEach(e=>e.classList.toggle('active',e.dataset.page===name));$('page-'+name).classList.add('active')}
-    document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showPage(b.dataset.page));
-    $('login-form').onsubmit=async event=>{event.preventDefault();setText('login-error','');try{const data=await post('/api/connect',{user:$('user').value,password:$('password').value,database:$('database').value});$('password').value='';$('login').classList.add('hidden');await refresh()}catch(error){setText('login-error',error.message)}};
-    $('logout').onclick=async()=>{try{await post('/api/logout',{})}catch(e){}$('login').classList.remove('hidden')};
-    $('refresh').onclick=refresh;document.querySelectorAll('[data-refresh]').forEach(b=>b.onclick=refresh);
-    $('run').onclick=async()=>{try{renderResult(await post('/api/query',{sql:$('sql').value}));await refresh()}catch(error){$('result').innerHTML='<div class="message error"></div>';$('result').firstChild.textContent=error.message}};
-    $('show-tables').onclick=()=>{$('sql').value='SHOW TABLES;';$('run').click()};
-    $('sql').addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key==='Enter'){$('run').click();e.preventDefault()}});
-    api('/api/health').then(data=>setText('endpoint',data.database_endpoint)).catch(()=>{});
-    refresh();
-  </script>
+<div id="login" class="login-screen">
+  <div class="login-brand"><div class="eyebrow">CSUDB 2026</div><h1>Database<br><span>Management Console</span></h1><p>Compiler · Database · Operating Systems</p><div class="login-rule"></div><small>Native database connection<br><code id="login-endpoint">127.0.0.1:6789</code></small></div>
+  <form id="login-form" class="login-panel"><div class="eyebrow">CONNECT</div><h2>Sign in to CSUDB</h2><p class="muted">Authenticate as the root database user.</p><label>Password<input id="password" type="password" autocomplete="current-password" autofocus></label><button class="primary" type="submit">Connect <span>→</span></button><div id="login-error" class="error-text"></div></form>
+</div>
+<header class="header"><a class="logo" href="#overview"><span>CSU</span>DB <b>2026</b></a><nav><button data-page="overview" class="active">Overview</button><button data-page="sql">SQL</button><button data-page="schema">Schema</button><button data-page="data">Data</button><button data-page="internals">Internals</button></nav><div class="header-context"><select id="database-select" aria-label="Database"></select><span class="connection"><i></i><span id="endpoint">127.0.0.1:6789</span></span><span class="user">root</span><button id="logout" class="icon-button" title="Logout">↪</button></div></header>
+<main class="shell">
+<section id="page-overview" class="page active"><div class="page-head"><div><div class="eyebrow">DATABASE RUNTIME</div><h1>Overview</h1><p class="muted">Live status and activity from the CSUDB service.</p></div><button class="ghost" data-refresh>Refresh</button></div><div class="metric-strip"><div><span>VERSION</span><strong id="v-version">—</strong></div><div><span>REQUESTS</span><strong id="v-requests">0</strong></div><div><span>CACHE HIT</span><strong id="v-hit-rate">—</strong></div><div><span>DISK R / W</span><strong id="v-io">0 / 0</strong></div><div><span>BUFFER</span><strong id="v-buffer">0 / 0</strong></div><div><span>POLICY</span><strong id="v-policy">—</strong></div></div><div class="overview-grid"><article class="panel activity-panel"><div class="panel-head"><div><h2>Query Activity</h2><p class="muted">Requests observed by the buffer pool</p></div><span class="live-label"><i></i> LIVE</span></div><div class="activity-chart" id="activity-chart"><div class="chart-empty">Waiting for samples…</div></div></article><article class="panel"><div class="panel-head"><div><h2>Buffer Pool</h2><p class="muted">Current frame state</p></div></div><div class="stacked" id="buffer-stacked"></div><div class="buffer-key"><span><i class="used"></i>Used</span><span><i class="pinned"></i>Pinned</span><span><i class="dirty"></i>Dirty</span><span><i class="free"></i>Free</span></div><div class="split-stats"><div><b id="buffer-used">0</b><small>used frames</small></div><div><b id="buffer-pinned">0</b><small>pinned</small></div><div><b id="buffer-dirty">0</b><small>dirty</small></div></div></article></div><div class="overview-grid lower"><article class="panel"><div class="panel-head"><div><h2>Server Information</h2><p class="muted">Authenticated CSUDB session</p></div></div><dl class="details" id="server-details"></dl></article><article class="panel"><div class="panel-head"><div><h2>Recent Queries</h2><p class="muted">This Web Console session</p></div></div><div id="recent-queries" class="empty">No queries executed in this session.</div></article></div></section>
+<section id="page-sql" class="page"><div class="page-head"><div><div class="eyebrow">WORKSPACE</div><h1>SQL</h1><p class="muted">Execute SQL through the authenticated Native protocol.</p></div><span class="context-chip">Database: <b id="sql-db">sys</b></span></div><article class="panel editor-panel"><div class="toolbar"><span class="file-dot"></span><span class="muted">query.sql</span><span class="toolbar-spacer"></span><button class="ghost" id="clear-sql">Clear</button><button class="primary small" id="run-sql">Run <kbd>Ctrl ↵</kbd></button></div><textarea id="sql-editor" spellcheck="false">SELECT * FROM student;</textarea><div id="sql-message" class="message">Ready. Run a query to see results.</div><div class="result-head"><span>Results</span><span id="query-time" class="muted"></span></div><div id="sql-result" class="result-grid"><div class="empty">No result yet.</div></div></article></section>
+<section id="page-schema" class="page"><div class="page-head"><div><div class="eyebrow">CATALOG</div><h1>Schema</h1><p class="muted">Tables and columns from the current database.</p></div><div class="inline-tools"><input id="schema-search" placeholder="Search tables…"><button class="ghost" data-refresh>Refresh</button></div></div><div class="schema-layout"><article class="panel"><div class="panel-head"><h2>Schema Graph</h2><span class="muted">Relationships are shown only when metadata is available.</span></div><div id="schema-graph" class="schema-graph"></div></article><aside class="panel schema-detail"><h2 id="schema-title">Select a table</h2><div id="schema-columns" class="empty">Choose a table to inspect its columns.</div></aside></div></section>
+<section id="page-data" class="page"><div class="page-head"><div><div class="eyebrow">EXPLORER</div><h1>Data</h1><p class="muted">Browse up to 100 rows from a table.</p></div><div class="selectors"><label>Table<select id="table-select"></select></label><button class="ghost" id="load-table">Load</button></div></div><article class="panel"><div class="tabs"><button class="active" data-tab="rows">Rows</button><button data-tab="structure">Structure</button><button data-tab="indexes">Indexes</button></div><div id="data-content" class="result-grid"><div class="empty">Select a table to load data.</div></div></article></section>
+<section id="page-internals" class="page"><div class="page-head"><div><div class="eyebrow">OBSERVABILITY</div><h1>Internals</h1><p class="muted">Read-only storage and buffer pool diagnostics.</p></div><button class="ghost" data-refresh>Refresh</button></div><div class="metric-strip"><div><span>CAPACITY</span><strong id="i-capacity">0</strong></div><div><span>USED</span><strong id="i-used">0</strong></div><div><span>PINNED</span><strong id="i-pinned">0</strong></div><div><span>DIRTY</span><strong id="i-dirty">0</strong></div><div><span>READS</span><strong id="i-reads">0</strong></div><div><span>WRITES</span><strong id="i-writes">0</strong></div></div><article class="panel"><div class="panel-head"><div><h2>Frame Map</h2><p class="muted">Each block is a frame returned by BufferPoolSnapshot.</p></div><div class="buffer-key"><span><i class="free"></i>Free</span><span><i class="used"></i>Clean</span><span><i class="pinned"></i>Pinned</span><span><i class="dirty"></i>Dirty</span></div></div><div id="frame-map" class="frame-map"></div><div id="frame-table" class="result-grid"></div></article></section>
+</main>
+<script src="/app.js"></script>
 </body>
 </html>
