@@ -22,7 +22,11 @@ RC TableScanPhysicalOperator::open(Trx *trx)
 {
   RC rc = table_->get_record_scanner(record_scanner_, trx, mode_);
   if (rc == RC::SUCCESS) {
-    tuple_.set_schema(table_, table_->table_meta().field_metas());
+    if (used_fields_.empty()) {
+      tuple_.set_schema(table_, table_->table_meta().field_metas());
+    } else {
+      tuple_.set_schema(table_, used_fields_);
+    }
   }
   trx_ = trx;
   return rc;

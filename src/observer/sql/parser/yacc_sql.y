@@ -22,9 +22,55 @@ string token_name(const char *sql_string, YYLTYPE *llocp)
 int yyerror(YYLTYPE *llocp, const char *sql_string, ParsedSqlResult *sql_result, yyscan_t scanner, const char *msg)
 {
   unique_ptr<ParsedSqlNode> error_sql_node = make_unique<ParsedSqlNode>(SCF_ERROR);
-  error_sql_node->error.error_msg = msg;
-  error_sql_node->error.line = llocp->first_line;
-  error_sql_node->error.column = llocp->first_column;
+
+  // bison 在 %define parse.error verbose 下给出的消息形如：
+  //   syntax error, unexpected ';', expecting IDENTIFIER or CONST or '(' or NOT
+  // 这里把它整理为需求要求的结构：错误位置 + 实际符号 + 期望集合
+  std::string detail(msg ? msg : "");
+  std::string unexpected_token;
+  std::string expected_set;
+
+  const std::string unexpected_marker = "unexpected ";
+  const std::string expecting_marker  = ", expecting ";
+
+  auto upos = detail.find(unexpected_marker);
+  if (upos != std::string::npos) {
+    auto tstart = upos + unexpected_marker.size();
+    auto tcomma = detail.find(',', tstart);
+    if (tcomma == std::string::npos) {
+      unexpected_token = detail.substr(tstart);
+    } else {
+      unexpected_token = detail.substr(tstart, tcomma - tstart);
+    }
+  }
+
+  auto epos = detail.find(expecting_marker);
+  if (epos != std::string::npos) {
+    expected_set = detail.substr(epos + expecting_marker.size());
+    // 把 bison 的 "A or B or C" 改写为 "A | B | C"
+    const std::string or_word = " or ";
+    std::string::size_type pos = 0;
+    while ((pos = expected_set.find(or_word, pos)) != std::string::npos) {
+      expected_set.replace(pos, or_word.size(), " | ");
+      pos += 3;
+    }
+  }
+
+  std::string message;
+  message += "SyntaxError at line " + std::to_string(llocp->first_line) + ", column " +
+             std::to_string(llocp->first_column) + "\n";
+  if (!unexpected_token.empty()) {
+    message += "unexpected token: " + unexpected_token + "\n";
+  }
+  if (!expected_set.empty()) {
+    message += "expected: " + expected_set;
+  } else if (unexpected_token.empty()) {
+    message += detail;
+  }
+
+  error_sql_node->error.error_msg = message;
+  error_sql_node->error.line      = llocp->first_line;
+  error_sql_node->error.column    = llocp->first_column;
   sql_result->add_sql_node(std::move(error_sql_node));
   return 0;
 }
@@ -33,11 +79,13 @@ ArithmeticExpr *create_arithmetic_expression(ArithmeticExpr::Type type,
                                              Expression *left,
                                              Expression *right,
                                              const char *sql_string,
-                                             YYLTYPE *llocp)
+                                             YYLTYPE *llocp,
+                                             YYLTYPE *op_locp)
 {
   ArithmeticExpr *expr = new ArithmeticExpr(type, left, right);
   expr->set_name(token_name(sql_string, llocp));
-  expr->set_location(llocp->first_line, llocp->first_column);
+  // 记录运算符本身的位置，便于语义错误定位（如 "operator '+' cannot be applied..."）
+  expr->set_location(op_locp->first_line, op_locp->first_column);
   return expr;
 }
 
@@ -62,20 +110,22 @@ static Expression *set_expr_name_and_location(Expression *expr, const char *sql_
   return expr;
 }
 
-// 将带引号的字符串常量还原为原始内容，并处理转义：'' -> '，\\ -> \，\x -> x
+// 将带引号的字符串常量还原为原始内容，并处理转义：
+//   单引号串：'' -> '，双引号串："" -> "，通用：\\ -> \，\x -> x
 char *unescape_quoted_string(char *quoted, int len)
 {
   if (len < 2) {
     return common::substr(quoted, 0, len);
   }
-  char *out     = new char[len + 1];
-  int   o       = 0;
+  const char quote = quoted[0];
+  char      *out   = (char *)malloc(len + 1);
+  int        o     = 0;
   for (int i = 1; i < len - 1; i++) {
     if (quoted[i] == '\\' && i + 1 < len - 1) {
       out[o++] = quoted[i + 1];
       i++;
-    } else if (quoted[i] == '\'' && i + 1 < len - 1 && quoted[i + 1] == '\'') {
-      out[o++] = '\'';
+    } else if (quoted[i] == quote && i + 1 < len - 1 && quoted[i + 1] == quote) {
+      out[o++] = quote;
       i++;
     } else {
       out[o++] = quoted[i];
@@ -101,7 +151,7 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
 %}
 
 %define api.pure full
-%define parse.error verbose
+%define parse.error custom
 /** 启用位置标识 **/
 %locations
 %lex-param { yyscan_t scanner }
@@ -276,11 +326,11 @@ vector<JoinSqlNode> *append_join_node(vector<JoinSqlNode> *join_list, char *rela
 %left '+' '-'
 %left '*' '/'
 %right UMINUS
-/* 布尔逻辑优先级：NOT > 比较 > AND > OR */
-%precedence NOT
-%left LT GT LE GE EQ NE
-%left AND
+/* 布尔逻辑优先级（越靠后越紧）：OR < AND < 比较 < NOT */
 %left OR
+%left AND
+%left LT GT LE GE EQ NE
+%precedence NOT
 %%
 
 commands: /* empty */                   { /* 允许空输入，便于多语句解析 */ }
@@ -508,6 +558,15 @@ insert_stmt:        /*insert   语句的语法解析树*/
       $$->insertion.values.swap(*$6);
       delete $6;
     }
+    | INSERT INTO ID LBRACE attr_list RBRACE VALUES LBRACE value_list RBRACE
+    {
+      $$ = new ParsedSqlNode(SCF_INSERT);
+      $$->insertion.relation_name = $3;
+      $$->insertion.columns.swap(*$5);
+      delete $5;
+      $$->insertion.values.swap(*$9);
+      delete $9;
+    }
     ;
 
 value_list:
@@ -533,7 +592,7 @@ value:
       @$ = @1;
     }
     |SSS {
-      char *tmp = common::substr($1,1,strlen($1)-2);
+      char *tmp = unescape_quoted_string($1, strlen($1));
       $$ = new Value(tmp);
       free(tmp);
     }
@@ -639,23 +698,23 @@ expression_list:
     ;
 expression:
     expression '+' expression {
-      $$ = create_arithmetic_expression(ArithmeticExpr::Type::ADD, $1, $3, sql_string, &@$);
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::ADD, $1, $3, sql_string, &@$, &@2);
     }
     | expression '-' expression {
-      $$ = create_arithmetic_expression(ArithmeticExpr::Type::SUB, $1, $3, sql_string, &@$);
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::SUB, $1, $3, sql_string, &@$, &@2);
     }
     | expression '*' expression {
-      $$ = create_arithmetic_expression(ArithmeticExpr::Type::MUL, $1, $3, sql_string, &@$);
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::MUL, $1, $3, sql_string, &@$, &@2);
     }
     | expression '/' expression {
-      $$ = create_arithmetic_expression(ArithmeticExpr::Type::DIV, $1, $3, sql_string, &@$);
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::DIV, $1, $3, sql_string, &@$, &@2);
     }
     | LBRACE expression RBRACE {
       $$ = $2;
       $$->set_name(token_name(sql_string, &@$));
     }
     | '-' expression %prec UMINUS {
-      $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$);
+      $$ = create_arithmetic_expression(ArithmeticExpr::Type::NEGATIVE, $2, nullptr, sql_string, &@$, &@1);
     }
     | '*' {
       $$ = new StarExpr();
@@ -988,6 +1047,98 @@ opt_semicolon: /*empty*/
 //_____________________________________________________________________
 extern void scan_string(const char *str, yyscan_t scanner);
 
+#include "sql/parser/expected_tokens.h"
+
+// %define parse.error custom 时由 bison 调用，可拿到完整的期望符号集合
+namespace {
+// 自动补全：以线程本地槽位收集光标处的期望符号，避免与正常报错路径相互影响
+thread_local bool                       g_expected_collecting = false;
+thread_local bool                       g_expected_reported   = false;
+thread_local std::vector<std::string>  *g_expected_tokens     = nullptr;
+thread_local int                        g_expected_line       = 0;
+thread_local int                        g_expected_column     = 0;
+}  // namespace
+
+int yyreport_syntax_error(
+    const yypcontext_t *ctx, const char *sql_string, ParsedSqlResult *sql_result, yyscan_t scanner)
+{
+  (void)scanner;
+
+  const YYLTYPE *loc = yypcontext_location(ctx);
+
+  // 自动补全模式：只回填期望符号集合，不生成错误节点
+  if (g_expected_collecting) {
+    // 只取第一次（光标哨兵处）的错误，忽略后续错误恢复
+    if (g_expected_reported) {
+      return 0;
+    }
+    g_expected_reported = true;
+    g_expected_line     = loc->first_line;
+    g_expected_column   = loc->first_column;
+    if (g_expected_tokens != nullptr) {
+      const int       token_max = 128;
+      yysymbol_kind_t expected[token_max];
+      int             n = yypcontext_expected_tokens(ctx, expected, token_max);
+      if (n >= 0) {
+        for (int i = 0; i < n; i++) {
+          g_expected_tokens->emplace_back(yysymbol_name(expected[i]));
+        }
+      }
+    }
+    return 0;
+  }
+
+  std::string    unexpected_token;
+  yysymbol_kind_t unexpected = yypcontext_token(ctx);
+  if (unexpected != YYSYMBOL_YYEMPTY) {
+    unexpected_token = yysymbol_name(unexpected);
+    // 词法无法识别的字符不在语法符号表内，bison 会给出 "invalid token"，
+    // 这里回填原始字符，并专门识别未闭合字符串，给出更清晰的原因。
+    if (unexpected_token == "invalid token" && sql_string != nullptr && loc->first_column > 0) {
+      size_t index = static_cast<size_t>(loc->first_column - 1);
+      if (index < strlen(sql_string)) {
+        char ch = sql_string[index];
+        if (ch == '\'' || ch == '"') {
+          unexpected_token = "unterminated string literal";
+        } else {
+          unexpected_token = std::string("'") + ch + "'";
+        }
+      }
+    }
+  }
+
+  std::string expected_set;
+  {
+    const int       token_max = 64;
+    yysymbol_kind_t expected[token_max];
+    int             n = yypcontext_expected_tokens(ctx, expected, token_max);
+    if (n >= 0) {
+      for (int i = 0; i < n; i++) {
+        if (i != 0) {
+          expected_set += " | ";
+        }
+        expected_set += yysymbol_name(expected[i]);
+      }
+    }
+  }
+
+  std::string message = "SyntaxError at line " + std::to_string(loc->first_line) + ", column " +
+                        std::to_string(loc->first_column) + "\n";
+  if (!unexpected_token.empty()) {
+    message += "unexpected token: " + unexpected_token + "\n";
+  }
+  if (!expected_set.empty()) {
+    message += "expected: " + expected_set;
+  }
+
+  unique_ptr<ParsedSqlNode> error_sql_node = make_unique<ParsedSqlNode>(SCF_ERROR);
+  error_sql_node->error.error_msg = message;
+  error_sql_node->error.line      = loc->first_line;
+  error_sql_node->error.column    = loc->first_column;
+  sql_result->add_sql_node(std::move(error_sql_node));
+  return 0;
+}
+
 int sql_parse(const char *s, ParsedSqlResult *sql_result) {
   yyscan_t scanner;
   std::vector<char *> allocated_strings;
@@ -1002,4 +1153,27 @@ int sql_parse(const char *s, ParsedSqlResult *sql_result) {
 
   yylex_destroy(scanner);
   return result;
+}
+
+int collect_expected_tokens(const char *sql, std::vector<std::string> &tokens, int &line, int &column)
+{
+  tokens.clear();
+  line   = 0;
+  column = 0;
+  if (sql == nullptr) {
+    return -1;
+  }
+
+  ParsedSqlResult result;
+  g_expected_tokens     = &tokens;
+  g_expected_collecting = true;
+  g_expected_reported   = false;
+  sql_parse(sql, &result);
+  g_expected_collecting = false;
+  g_expected_reported   = false;
+  g_expected_tokens     = nullptr;
+
+  line   = g_expected_line;
+  column = g_expected_column;
+  return static_cast<int>(tokens.size());
 }

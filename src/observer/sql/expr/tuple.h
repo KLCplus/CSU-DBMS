@@ -184,6 +184,20 @@ public:
     }
   }
 
+  // 投影裁剪：只保留查询真正需要的列
+  void set_schema(const Table *table, const vector<const FieldMeta *> &fields)
+  {
+    table_ = table;
+    for (FieldExpr *spec : speces_) {
+      delete spec;
+    }
+    this->speces_.clear();
+    this->speces_.reserve(fields.size());
+    for (const FieldMeta *field : fields) {
+      speces_.push_back(new FieldExpr(table, field));
+    }
+  }
+
   int cell_num() const override { return speces_.size(); }
 
   RC cell_at(int index, Value &cell) const override
@@ -197,9 +211,19 @@ public:
     const FieldMeta *field_meta = field_expr->field().meta();
     cell.reset();
 
+    // NULL 位图按字段在表元数据中的原始下标寻址；投影裁剪后下标不再等于 index
+    int field_index = index;
+    const TableMeta &table_meta = table_->table_meta();
+    for (int i = 0; i < table_meta.field_num(); i++) {
+      if (table_meta.field(i) == field_meta) {
+        field_index = i;
+        break;
+      }
+    }
+
     // 判断该字段是否为 NULL
     const char *bitmap = this->record_->data() + table_->table_meta().null_bitmap_offset();
-    if (bitmap[index / 8] & (1 << (index % 8))) {
+    if (bitmap[field_index / 8] & (1 << (field_index % 8))) {
       cell.set_null();
       return RC::SUCCESS;
     }

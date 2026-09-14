@@ -17,6 +17,7 @@ See the Mulan PSL v2 for more details. */
 #include <fcntl.h>
 #include <fstream>
 #include <sys/stat.h>
+#include <strings.h>
 
 #include "common/lang/string.h"
 #include "common/log/log.h"
@@ -227,9 +228,18 @@ RC Db::register_index(const TableMeta &table_meta, const IndexMeta &index_meta)
 
 Table *Db::find_table(const char *table_name) const
 {
+  if (table_name == nullptr) {
+    return nullptr;
+  }
   unordered_map<string, Table *>::const_iterator iter = opened_tables_.find(table_name);
   if (iter != opened_tables_.end()) {
     return iter->second;
+  }
+  // 表名大小写不敏感：退化为遍历比较
+  for (const auto &pair : opened_tables_) {
+    if (0 == strcasecmp(pair.first.c_str(), table_name)) {
+      return pair.second;
+    }
   }
   return nullptr;
 }

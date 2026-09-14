@@ -354,8 +354,14 @@ bool ArithmeticExpr::equal(const Expression &other) const
     return false;
   }
   auto &other_arith_expr = static_cast<const ArithmeticExpr &>(other);
-  return arithmetic_type_ == other_arith_expr.arithmetic_type() && left_->equal(*other_arith_expr.left_) &&
-         right_->equal(*other_arith_expr.right_);
+  if (arithmetic_type_ != other_arith_expr.arithmetic_type() || !left_->equal(*other_arith_expr.left_)) {
+    return false;
+  }
+  // 一元运算没有右操作数
+  if (right_ == nullptr || other_arith_expr.right_ == nullptr) {
+    return right_ == other_arith_expr.right_;
+  }
+  return right_->equal(*other_arith_expr.right_);
 }
 AttrType ArithmeticExpr::value_type() const
 {
@@ -488,6 +494,10 @@ RC ArithmeticExpr::get_value(const Tuple &tuple, Value &value) const
     LOG_WARN("failed to get value of left expression. rc=%s", strrc(rc));
     return rc;
   }
+  // 一元运算（如取负）没有右操作数
+  if (right_ == nullptr) {
+    return calc_value(left_value, right_value, value);
+  }
   rc = right_->get_value(tuple, right_value);
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get value of right expression. rc=%s", strrc(rc));
@@ -510,6 +520,10 @@ RC ArithmeticExpr::get_column(Chunk &chunk, Column &column)
   if (rc != RC::SUCCESS) {
     LOG_WARN("failed to get column of left expression. rc=%s", strrc(rc));
     return rc;
+  }
+  // 一元运算（如取负）没有右操作数
+  if (right_ == nullptr) {
+    return calc_column(left_column, right_column, column);
   }
   rc = right_->get_column(chunk, right_column);
   if (rc != RC::SUCCESS) {

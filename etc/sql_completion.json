@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "model_enabled": true,
+  "llama_base_url": "http://127.0.0.1:8012",
+  "model_debounce_ms": 150,
+  "model_http_timeout_ms": 800,
+  "model_max_tokens": 32,
+  "model_temperature": 0.0,
+  "max_completion_items": 12,
+  "max_schema_tables": 8,
+  "max_schema_columns": 128,
+  "max_context_tokens": 4096
+}

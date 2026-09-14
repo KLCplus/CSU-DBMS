@@ -237,6 +237,9 @@ RC PhysicalPlanGenerator::create_plan(TableGetLogicalOperator &table_get_oper, u
   } else {
     auto table_scan_oper = new TableScanPhysicalOperator(table, table_get_oper.read_write_mode());
     table_scan_oper->set_predicates(std::move(predicates));
+    if (table_get_oper.used_fields_valid()) {
+      table_scan_oper->set_used_fields(vector<const FieldMeta *>(table_get_oper.used_fields()));
+    }
     oper = unique_ptr<PhysicalOperator>(table_scan_oper);
     LOG_TRACE("use table scan");
   }

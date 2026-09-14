@@ -46,15 +46,21 @@ RC ParseStage::handle_request(SQLStageEvent *sql_event)
     LOG_WARN("got multi sql commands but only 1 will be handled");
   }
 
-  unique_ptr<ParsedSqlNode> sql_node = std::move(parsed_sql_result.sql_nodes().front());
-  if (sql_node->flag == SCF_ERROR) {
-    // set error information to event
-    rc = RC::SQL_SYNTAX;
-    sql_result->set_return_code(rc);
-    sql_result->set_state_string("Failed to parse sql");
-    return rc;
+  // 只要任意一条语句解析失败，就把该错误反馈给用户（避免尾部非法内容被忽略）
+  for (const unique_ptr<ParsedSqlNode> &node : parsed_sql_result.sql_nodes()) {
+    if (node->flag == SCF_ERROR) {
+      rc = RC::SQL_SYNTAX;
+      sql_result->set_return_code(rc);
+      if (!node->error.error_msg.empty()) {
+        sql_result->set_state_string(node->error.error_msg);
+      } else {
+        sql_result->set_state_string("Failed to parse sql");
+      }
+      return rc;
+    }
   }
 
+  unique_ptr<ParsedSqlNode> sql_node = std::move(parsed_sql_result.sql_nodes().front());
   sql_event->set_sql_node(std::move(sql_node));
 
   return RC::SUCCESS;

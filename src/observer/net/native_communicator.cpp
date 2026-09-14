@@ -119,6 +119,16 @@ RC NativeCommunicator::read_event(SessionEvent *&event)
   } else if (type == "buffer_snapshot") {
     event->set_request_type(ClientRequestType::BUFFER_SNAPSHOT);
     event->set_snapshot_limit(root.get("limit", 20).asUInt64());
+  } else if (type == "complete") {
+    event->set_request_type(ClientRequestType::COMPLETE);
+    event->set_completion_sql(root.get("sql", "").asString());
+    if (root.isMember("cursor")) {
+      event->set_completion_cursor(root["cursor"].asUInt64());
+    } else {
+      event->set_completion_cursor(event->completion_sql().size());
+    }
+    event->set_completion_max_items(root.get("max_items", 12).asUInt64());
+    event->set_completion_want_model(root.get("want_model", true).asBool());
   } else if (type == "query") {
     event->set_request_type(ClientRequestType::QUERY);
     event->set_query(root.get("sql", "").asString());

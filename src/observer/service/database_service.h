@@ -30,6 +30,7 @@ private:
   QueryResult login(Session &session, const string &username, const string &password, const string &database);
   QueryResult server_info(Session &session, bool include_frames, size_t limit);
   QueryResult execute_sql(SessionEvent &event);
+  QueryResult complete_sql(SessionEvent &event);
   QueryResult materialize(SessionEvent &event, RC pipeline_rc);
   QueryResult execute_management(Session &session, const string &sql, bool &handled);
   bool authorize_sql(const Session &session, const string &sql, string &reason) const;

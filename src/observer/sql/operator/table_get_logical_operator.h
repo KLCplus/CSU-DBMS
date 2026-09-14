@@ -57,6 +57,15 @@ public:
   void set_predicates(vector<unique_ptr<Expression>> &&exprs);
   auto predicates() -> vector<unique_ptr<Expression>> & { return predicates_; }
 
+  // 投影裁剪：记录查询真正需要读取的列（仅读表时有效）
+  void set_used_fields(vector<const FieldMeta *> &&fields)
+  {
+    used_fields_       = std::move(fields);
+    used_fields_valid_ = true;
+  }
+  bool                               used_fields_valid() const { return used_fields_valid_; }
+  const vector<const FieldMeta *>   &used_fields() const { return used_fields_; }
+
 private:
   Table        *table_ = nullptr;
   ReadWriteMode mode_  = ReadWriteMode::READ_WRITE;
@@ -66,4 +75,7 @@ private:
   // 不包含复杂的表达式运算，比如加减乘除、或者conjunction expression
   // 如果有多个表达式，他们的关系都是 AND
   vector<unique_ptr<Expression>> predicates_;
+
+  vector<const FieldMeta *> used_fields_;        ///< 投影裁剪后需要的字段集合
+  bool                      used_fields_valid_ = false;
 };

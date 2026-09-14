@@ -6,6 +6,7 @@ deps/3rd/*
 docs/doxy/
 build/*
 build_*
+!scripts/build_llama_p40.sh
 cmake-build-*/*
 build
 .cache/*

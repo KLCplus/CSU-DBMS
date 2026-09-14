@@ -43,6 +43,21 @@ namespace tui = common::terminal;
 constexpr int DEFAULT_PORT = 6789;
 constexpr size_t MAX_PACKET_SIZE = 16 * 1024 * 1024;
 
+class Shell;
+Shell *g_active_shell = nullptr;
+
+struct CompletionEntry
+{
+  string insert_text;
+  string display_text;
+  string kind;
+  string source;
+  string detail;
+  size_t replace_start = 0;
+  size_t replace_end   = 0;
+  double score         = 0.0;
+};
+
 struct ClientOptions
 {
   string host = "127.0.0.1";
@@ -59,6 +74,7 @@ struct ClientOptions
   bool timing = false;
   string execute_sql;
   string file;
+  string complete_sql;
 };
 
 struct CliOverrides
@@ -102,7 +118,8 @@ void usage(const char *program)
        << "      --config FILE        Alternate profile file\n\n"
        << "Execution:\n"
        << "  -e, --execute SQL        Execute SQL and exit\n"
-       << "  -f, --file FILE          Execute SQL file and exit\n"
+        << "  -f, --file FILE          Execute SQL file and exit\n"
+        << "      --complete \"SQL\"       Print SQL completion candidates and exit\n"
        << "      --batch              Tab-separated script output\n"
        << "      --silent             Suppress banner\n"
        << "      --no-color           Disable ANSI color\n"
@@ -168,7 +185,7 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
   const char *env_profile = getenv("CSUDB_PROFILE");
   if (env_profile != nullptr) options.profile = env_profile;
 
-  enum { OPT_PROFILE = 1000, OPT_CONFIG, OPT_BATCH, OPT_SILENT, OPT_NO_COLOR, OPT_PING, OPT_TABLE, OPT_HELP, OPT_VERSION };
+  enum { OPT_PROFILE = 1000, OPT_CONFIG, OPT_BATCH, OPT_SILENT, OPT_NO_COLOR, OPT_PING, OPT_TABLE, OPT_HELP, OPT_VERSION, OPT_COMPLETE };
   static option long_options[] = {{"host", required_argument, nullptr, 'h'}, {"port", required_argument, nullptr, 'P'},
       {"user", required_argument, nullptr, 'u'}, {"password", no_argument, nullptr, 'p'},
       {"database", required_argument, nullptr, 'D'}, {"execute", required_argument, nullptr, 'e'},
@@ -176,6 +193,7 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
       {"config", required_argument, nullptr, OPT_CONFIG}, {"batch", no_argument, nullptr, OPT_BATCH},
       {"silent", no_argument, nullptr, OPT_SILENT}, {"no-color", no_argument, nullptr, OPT_NO_COLOR},
       {"ping", no_argument, nullptr, OPT_PING}, {"table", no_argument, nullptr, OPT_TABLE},
+      {"complete", required_argument, nullptr, OPT_COMPLETE},
       {"help", no_argument, nullptr, OPT_HELP}, {"version", no_argument, nullptr, OPT_VERSION}, {nullptr, 0, nullptr, 0}};
 
   // First pass records command-line values; profile configuration is merged afterward.
@@ -196,6 +214,7 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
       case OPT_NO_COLOR: options.no_color = true; break;
       case OPT_PING: options.ping = true; options.silent = true; break;
       case OPT_TABLE: options.batch = false; break;
+      case OPT_COMPLETE: options.complete_sql = optarg; options.silent = true; break;
       case OPT_HELP: usage(argv[0]); std::exit(0);
       case OPT_VERSION: cout << CSUDB_PRODUCT_NAME << " " << CSUDB_VERSION_STRING << endl; std::exit(0);
       default: return false;
@@ -467,6 +486,7 @@ const char *meta_help = R"(CSUDB shell commands:
   /connect HOST PORT USER    Reconnect (password is prompted)
   /use DATABASE              Select database
   /database                  Show current database
+  /complete SQL              Show SQL completion candidates for a prefix
   /timing [on|off]           Toggle execution timing
   /clear                     Clear an ANSI terminal
   /history                   Show session history
@@ -568,9 +588,15 @@ replxx::Replxx::hints_t hint_meta_command(
   return hints;
 }
 
+replxx::Replxx::completions_t complete_dispatch(const string &input, int &context_length);
+replxx::Replxx::hints_t       hint_dispatch(const string &input, int &context_length, replxx::Replxx::Color &color);
+
 class Shell
 {
 public:
+  friend replxx::Replxx::completions_t complete_dispatch(const string &input, int &context_length);
+  friend replxx::Replxx::hints_t       hint_dispatch(const string &input, int &context_length, replxx::Replxx::Color &color);
+
   explicit Shell(ClientOptions options) : options_(std::move(options)) {}
 
   int run()
@@ -587,6 +613,10 @@ public:
     }
     bool interactive_login = isatty(STDIN_FILENO) && options_.execute_sql.empty() && options_.file.empty();
     string password = (options_.prompt_password || interactive_login) ? read_password() : "";
+    if (password.empty()) {
+      const char *env_password = getenv("CSUDB_PASSWORD");
+      if (env_password != nullptr) password = env_password;
+    }
     Json::Value login_request, login_response;
     login_request["type"] = "login"; login_request["user"] = options_.user; login_request["password"] = password; login_request["database"] = options_.database;
     if (!connection_.request(login_request, login_response, error)) { cerr << "ERROR: login request failed: " << error << '\n'; return 2; }
@@ -600,6 +630,7 @@ public:
 
     if (!options_.execute_sql.empty()) return execute(options_.execute_sql) ? 0 : 1;
     if (!options_.file.empty()) return execute_file(options_.file) ? 0 : 1;
+    if (!options_.complete_sql.empty()) return print_completion(options_.complete_sql) ? 0 : 1;
     if (!isatty(STDIN_FILENO)) { std::ostringstream input; input << std::cin.rdbuf(); return execute_script(input.str()) ? 0 : 1; }
     return interactive();
   }
@@ -621,6 +652,101 @@ private:
     string error;
     if (!connection_.request(request, response, error)) { cerr << "ERROR: connection failed: " << error << '\n'; return false; }
     return true;
+  }
+
+  // 从服务端获取 SQL 补全候选（确定性 + 可选模型 ghost text）
+  bool fetch_completion(const string &buffer, size_t cursor, bool want_model, vector<CompletionEntry> &items, string &ghost, bool &model_used)
+  {
+    Json::Value request_value, response;
+    request_value["type"]       = "complete";
+    request_value["sql"]        = buffer;
+    request_value["cursor"]     = Json::UInt64(cursor);
+    request_value["max_items"]  = Json::UInt(12);
+    request_value["want_model"] = want_model;
+    if (!request(request_value, response)) return false;
+    if (!response.get("success", false).asBool()) return false;
+
+    const Json::Value &rows = response["rows"];
+    for (const Json::Value &row : rows) {
+      if (row.size() < 8) continue;
+      CompletionEntry entry;
+      entry.insert_text   = row[0].asString();
+      entry.display_text  = row[1].asString();
+      entry.kind          = row[2].asString();
+      entry.source        = row[3].asString();
+      entry.replace_start = static_cast<size_t>(std::strtoll(row[4].asString().c_str(), nullptr, 10));
+      entry.replace_end   = static_cast<size_t>(std::strtoll(row[5].asString().c_str(), nullptr, 10));
+      entry.score         = std::atof(row[6].asString().c_str());
+      entry.detail        = row[7].asString();
+      items.push_back(std::move(entry));
+    }
+    if (response["attributes"].isMember("ghost_text")) ghost = response["attributes"]["ghost_text"].asString();
+    if (response["attributes"].isMember("model_used")) model_used = response["attributes"]["model_used"].asString() == "true";
+    return true;
+  }
+
+  bool print_completion(const string &sql)
+  {
+    vector<CompletionEntry> items;
+    string                  ghost;
+    bool                    model_used = false;
+    if (!fetch_completion(sql, sql.size(), false, items, ghost, model_used)) {
+      cerr << "ERROR: completion request failed\n";
+      return false;
+    }
+    cout << "SQL> " << sql << '\n';
+    for (const CompletionEntry &item : items) {
+      cout << "  " << std::left << std::setw(18) << item.insert_text << "  " << item.kind << "  " << item.source;
+      if (!item.detail.empty()) cout << "  " << item.detail;
+      cout << '\n';
+    }
+    if (!ghost.empty()) cout << "ghost: " << ghost << '\n';
+    return true;
+  }
+
+  // replxx 补全回调：SQL 语句补全（命令行/多行均可，使用 Shell 累积的 buffer）
+  replxx::Replxx::completions_t complete_line(const string &input, int &context_length)
+  {
+    replxx::Replxx::completions_t completions;
+    if (input.empty()) return completions;
+
+    // 元命令仍走原有补全
+    if (input[0] == '/' || input[0] == '\\') {
+      return complete_meta_command(input, context_length);
+    }
+
+    // 禁止在字符串/注释中补全（服务端还会再做一次安全校验）
+    string  full   = sql_buffer_.empty() ? input : sql_buffer_ + "\n" + input;
+    size_t  cursor = full.size();
+    vector<CompletionEntry> items;
+    string                  ghost;
+    bool                    model_used = false;
+    if (!fetch_completion(full, cursor, false, items, ghost, model_used)) return completions;
+
+    for (const CompletionEntry &item : items) completions.emplace_back(item.insert_text);
+    if (!items.empty() && items.front().replace_end <= cursor) {
+      context_length = static_cast<int>(cursor - items.front().replace_start);
+    }
+    return completions;
+  }
+
+  // replxx ghost text 回调（模型未启用时不会返回内容）
+  replxx::Replxx::hints_t hint_line(const string &input, int &context_length, replxx::Replxx::Color &color)
+  {
+    replxx::Replxx::hints_t hints;
+    if (input.empty() || input[0] == '/' || input[0] == '\\') return hints;
+    string full   = sql_buffer_.empty() ? input : sql_buffer_ + "\n" + input;
+    size_t cursor = full.size();
+    vector<CompletionEntry> items;
+    string                  ghost;
+    bool                    model_used = false;
+    if (!fetch_completion(full, cursor, true, items, ghost, model_used)) return hints;
+    if (!ghost.empty()) {
+      hints.emplace_back(ghost);
+      context_length = 0;
+      color          = replxx::Replxx::Color::GRAY;
+    }
+    return hints;
   }
 
   bool execute(string sql)
@@ -679,6 +805,12 @@ private:
     if (lower == "/buffer") { show_status(false, 0); return true; }
     if (lower == "/pages") { size_t limit = 20; stream >> limit; show_status(true, std::min<size_t>(limit, 200)); return true; }
     if (lower == "/database") { output() << (options_.database.empty() ? "(none)" : options_.database) << '\n'; return true; }
+    if (lower == "/complete") {
+      string rest;
+      std::getline(stream, rest);
+      print_completion(trim(rest));
+      return true;
+    }
     if (lower == "/use") { string database; stream >> database; if (database.empty()) cerr << "Usage: /use DATABASE\n"; else execute("USE " + database + ";"); return true; }
     if (lower == "/timing") {
       string setting; stream >> setting; setting = upper(setting);
@@ -753,34 +885,36 @@ private:
     string history_path = config_dir + "/history";
     common::MiniobLineReader &line_reader = common::MiniobLineReader::instance();
     line_reader.init(history_path);
-    line_reader.set_completion_callback(complete_meta_command);
-    line_reader.set_hint_callback(hint_meta_command);
+    g_active_shell = this;
+    line_reader.set_completion_callback(complete_dispatch);
+    line_reader.set_hint_callback(hint_dispatch);
     bool quit = false;
-    string sql;
+    sql_buffer_.clear();
     while (!quit) {
       const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO, !options_.no_color);
       const tui::Style style(terminal.color());
       const string database = options_.database.empty() ? "(none)" : options_.database;
       const string symbol = terminal.unicode() ? "❯" : ">";
-      string prompt = sql.empty()
+      string prompt = sql_buffer_.empty()
           ? style.magenta("csudb") + " " + style.purple("[" + database + "]") + " " + style.cyan(symbol) + " "
           : style.dim("    ->") + " ";
       string line = line_reader.my_readline(prompt, false);
       if (line_reader.eof()) break;
-      if (line == "interrupted") { sql.clear(); cout << "^C\n"; continue; }
-      if (sql.empty() && !trim(line).empty() && (trim(line)[0] == '/' || trim(line)[0] == '\\')) {
+      if (line == "interrupted") { sql_buffer_.clear(); cout << "^C\n"; continue; }
+      if (sql_buffer_.empty() && !trim(line).empty() && (trim(line)[0] == '/' || trim(line)[0] == '\\')) {
         dispatch_meta(trim(line), quit);
         continue;
       }
       if (trim(line).empty()) continue;
-      if (!sql.empty()) sql.push_back('\n');
-      sql += line;
-      if (!complete_sql(sql)) continue;
-      string history_entry = trim(sql);
+      if (!sql_buffer_.empty()) sql_buffer_.push_back('\n');
+      sql_buffer_ += line;
+      if (!complete_sql(sql_buffer_)) continue;
+      string history_entry = trim(sql_buffer_);
       if (!sensitive_sql(history_entry)) { line_reader.add_history(history_entry); session_history_.push_back(history_entry); }
-      execute(sql);
-      sql.clear();
+      execute(sql_buffer_);
+      sql_buffer_.clear();
     }
+    g_active_shell = nullptr;
     return 0;
   }
 
@@ -788,7 +922,20 @@ private:
   NativeConnection connection_;
   std::ofstream output_file_;
   vector<string> session_history_;
+  string         sql_buffer_;
 };
+
+replxx::Replxx::completions_t complete_dispatch(const string &input, int &context_length)
+{
+  if (g_active_shell != nullptr) return g_active_shell->complete_line(input, context_length);
+  return complete_meta_command(input, context_length);
+}
+
+replxx::Replxx::hints_t hint_dispatch(const string &input, int &context_length, replxx::Replxx::Color &color)
+{
+  if (g_active_shell != nullptr) return g_active_shell->hint_line(input, context_length, color);
+  return hint_meta_command(input, context_length, color);
+}
 
 } // namespace
 

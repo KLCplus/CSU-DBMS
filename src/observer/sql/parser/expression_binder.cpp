@@ -15,6 +15,7 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/lang/string.h"
 #include "common/lang/ranges.h"
+#include "common/type/attr_type.h"
 #include <cstdio>
 #include "sql/parser/expression_binder.h"
 #include "sql/expr/expression_iterator.h"
@@ -24,7 +25,36 @@ using namespace common;
 namespace
 {
 thread_local std::string g_binder_error_message;
+
+const char *arithmetic_type_to_string(ArithmeticExpr::Type type)
+{
+  switch (type) {
+    case ArithmeticExpr::Type::ADD: return "+";
+    case ArithmeticExpr::Type::SUB: return "-";
+    case ArithmeticExpr::Type::MUL: return "*";
+    case ArithmeticExpr::Type::DIV: return "/";
+    case ArithmeticExpr::Type::NEGATIVE: return "-";
+  }
+  return "?";
 }
+
+void set_arithmetic_type_error(const ArithmeticExpr &expr, AttrType left_type, AttrType right_type)
+{
+  char msg[512];
+  if (right_type == AttrType::UNDEFINED) {
+    snprintf(msg, sizeof(msg),
+        "SemanticError at line %d, column %d\n\noperator '%s' cannot be applied to\n%s",
+        expr.line(), expr.column(), arithmetic_type_to_string(expr.arithmetic_type()),
+        attr_type_to_sql_string(left_type));
+  } else {
+    snprintf(msg, sizeof(msg),
+        "SemanticError at line %d, column %d\n\noperator '%s' cannot be applied to\n%s and %s",
+        expr.line(), expr.column(), arithmetic_type_to_string(expr.arithmetic_type()),
+        attr_type_to_sql_string(left_type), attr_type_to_sql_string(right_type));
+  }
+  set_binder_error_message(msg);
+}
+}  // namespace
 
 void reset_binder_error_message() { g_binder_error_message.clear(); }
 void set_binder_error_message(const std::string &msg) { g_binder_error_message = msg; }
@@ -360,20 +390,37 @@ RC ExpressionBinder::bind_arithmetic_expression(
     left_expr.reset(left.release());
   }
 
-  child_bound_expressions.clear();
-  rc = bind_expression(right_expr, child_bound_expressions);
-  if (OB_FAIL(rc)) {
-    return rc;
+  if (right_expr != nullptr) {
+    child_bound_expressions.clear();
+    rc = bind_expression(right_expr, child_bound_expressions);
+    if (OB_FAIL(rc)) {
+      return rc;
+    }
+
+    if (child_bound_expressions.size() != 1) {
+      LOG_WARN("invalid right children number of comparison expression: %d", child_bound_expressions.size());
+      return RC::INVALID_ARGUMENT;
+    }
+
+    unique_ptr<Expression> &right = child_bound_expressions[0];
+    if (right.get() != right_expr.get()) {
+      right_expr.reset(right.release());
+    }
   }
 
-  if (child_bound_expressions.size() != 1) {
-    LOG_WARN("invalid right children number of comparison expression: %d", child_bound_expressions.size());
-    return RC::INVALID_ARGUMENT;
+  // 类型一致性校验：算术运算只接受数值类型（简化类型系统集中在绑定阶段）
+  //   INT + INT -> INT, INT + FLOAT -> FLOAT, INT + VARCHAR -> ERROR
+  const AttrType left_value_type = left_expr->value_type();
+  if (!is_numerical_type(left_value_type)) {
+    set_arithmetic_type_error(*arithmetic_expr, left_value_type, AttrType::UNDEFINED);
+    return RC::SCHEMA_FIELD_TYPE_MISMATCH;
   }
-
-  unique_ptr<Expression> &right = child_bound_expressions[0];
-  if (right.get() != right_expr.get()) {
-    right_expr.reset(right.release());
+  if (right_expr != nullptr) {
+    const AttrType right_value_type = right_expr->value_type();
+    if (!is_numerical_type(right_value_type)) {
+      set_arithmetic_type_error(*arithmetic_expr, left_value_type, right_value_type);
+      return RC::SCHEMA_FIELD_TYPE_MISMATCH;
+    }
   }
 
   bound_expressions.emplace_back(std::move(expr));

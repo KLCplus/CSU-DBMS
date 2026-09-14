@@ -144,6 +144,7 @@ struct CalcSqlNode
 struct InsertSqlNode
 {
   string        relation_name;  ///< Relation to insert into
+  vector<string> columns;       ///< 可选的列清单；为空表示按表字段顺序插入
   vector<Value> values;         ///< 要插入的值
 };
 
