@@ -111,25 +111,35 @@ SameSite=Strict Cookie 标识。
 executemany、fetchone/fetchmany/fetchall、description、rowcount、
 commit/rollback，以及 server_info 和 buffer_snapshot 诊断扩展。
 
-当前参数绑定在驱动端进行字面量转义，并不是服务端 PreparedStatement。未来
-JDBC、Go 与正式 Python 包都应继续复用 Native 协议，不得绕过 DatabaseService。
+当前参数绑定在驱动端进行字面量转义，并不是服务端 PreparedStatement。所有
+第三方驱动都应继续复用 Native 协议，不得绕过 DatabaseService。
 
 ## 5. JDBC 接入说明
 
-当前仓库已有 MySQL communicator，可进行实验性协议连接：
+正式 JDBC 驱动位于 `sdk/java`，使用标准 URL：
 
-    csudbd --protocol mysql --host 127.0.0.1 --port 6789
+    jdbc:csudb://127.0.0.1:6789/school
 
-开发者可用 MySQL Connector/J 做兼容性实验，但当前不承诺完整 JDBC/MySQL
-协议覆盖，尤其是 prepared statement、完整类型映射、TLS 和全部握手能力。
-正式应用接入优先使用 Native Python 驱动。后续真正的 csudb-jdbc 应基于稳定
-QueryResult 和认证 API 实现。
+构建及运行示例：
+
+    ./sdk/java/build.sh
+    javac -cp sdk/java/build/csudb-jdbc-2026.1.0.jar \
+      -d sdk/java/build/example examples/JdbcExample.java
+    java -cp sdk/java/build/csudb-jdbc-2026.1.0.jar:sdk/java/build/example \
+      JdbcExample
+
+它支持 DriverManager 自动发现、Connection、Statement、PreparedStatement、
+ResultSet、结果元数据和基本事务入口。当前参数绑定仍在驱动端完成，结果集会
+完整物化；TLS、流式结果、服务端 PreparedStatement 和连接池尚未实现。
+
+原有 MySQL communicator 继续作为实验兼容层，可通过 `--protocol mysql`
+启动，但不作为 CSUDB JDBC 驱动的依赖，也不承诺完整 MySQL 协议兼容。
 
 ## 6. 安装
 
     cmake --install build_debug --prefix ~/.local
 
-安装内容包括 csudb、csudbd、Web helper、HTML 资源、Python SDK、示例配置和
-shell completion。卸载脚本只删除程序与资源，永远不删除数据库数据目录：
+安装内容包括 csudb、csudbd、Web helper、HTML 资源、Java/Python SDK、示例
+配置和 shell completion。卸载脚本只删除程序与资源，永远不删除数据库数据目录：
 
     ./scripts/uninstall.sh --user

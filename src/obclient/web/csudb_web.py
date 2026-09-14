@@ -156,6 +156,12 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/":
             self._send_file(SCRIPT_DIR / "index.html", "text/html; charset=utf-8")
             return
+        if parsed.path == "/app.css":
+            self._send_file(SCRIPT_DIR / "app.css", "text/css; charset=utf-8")
+            return
+        if parsed.path == "/app.js":
+            self._send_file(SCRIPT_DIR / "app.js", "text/javascript; charset=utf-8")
+            return
         if parsed.path == "/api/health":
             self._send_json(HTTPStatus.OK, {
                 "success": True,
@@ -185,7 +191,24 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError("invalid table name")
                 result = public_result(connection._request({"type": "query", "sql": f"SELECT * FROM {name};"}))
                 result["rows"] = result["rows"][:100]
+                result["limited_to"] = 100
+                result["server_pagination"] = False
                 self._send_json(HTTPStatus.OK, result)
+            elif parsed.path == "/api/schema":
+                name = parse_qs(parsed.query).get("name", [""])[0]
+                if not IDENTIFIER.fullmatch(name):
+                    raise ValueError("invalid table name")
+                description = public_result(connection._request({"type": "query", "sql": f"DESC {name};"}))
+                self._send_json(HTTPStatus.OK, {
+                    "success": True,
+                    "table": name,
+                    "columns": [{"name": row[0], "type": row[1], "length": row[2]}
+                                for row in description["rows"] if len(row) >= 3],
+                    "indexes": [],
+                    "foreign_keys": [],
+                    "index_metadata_available": False,
+                    "foreign_key_metadata_available": False,
+                })
             else:
                 self._send_json(HTTPStatus.NOT_FOUND, {"success": False, "error": {"message": "unknown endpoint"}})
         except (csudb.Error, ValueError) as exc:
@@ -204,9 +227,9 @@ class Handler(BaseHTTPRequestHandler):
                 connection = csudb.connect(
                     host=self.server.db_host,
                     port=self.server.db_port,
-                    user=str(body.get("user", "root")),
+                    user="root",
                     password=str(body.get("password", "")),
-                    database=str(body.get("database", "sys")),
+                    database="sys",
                 )
             except csudb.Error as exc:
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"success": False, "error": {"message": "authentication failed"}})

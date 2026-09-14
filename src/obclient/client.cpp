@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "common/linereader/line_reader.h"
+#include "common/terminal/terminal_ui.h"
 #include "common/version.h"
 #include "json/json.h"
 #include "web_console_launcher.h"
@@ -36,6 +37,8 @@ using std::string;
 using std::vector;
 
 namespace {
+
+namespace tui = common::terminal;
 
 constexpr int DEFAULT_PORT = 6789;
 constexpr size_t MAX_PACKET_SIZE = 16 * 1024 * 1024;
@@ -316,17 +319,19 @@ private:
   int fd_ = -1;
 };
 
-void render_table(const Json::Value &response, std::ostream &out, bool batch, bool timing)
+void render_table(
+    const Json::Value &response, std::ostream &out, bool batch, bool timing, const tui::Style &style)
 {
   if (!response.get("success", false).asBool()) {
     const Json::Value &error = response["error"];
-    out << "ERROR " << error.get("code", 1).asInt() << ": " << error.get("message", "request failed").asString() << '\n';
+    out << style.bold(style.red("ERROR " + std::to_string(error.get("code", 1).asInt()))) << ": "
+        << error.get("message", "request failed").asString() << '\n';
     return;
   }
   const Json::Value &columns = response["columns"];
   const Json::Value &rows = response["rows"];
   if (columns.empty()) {
-    out << response.get("message", "Query OK").asString();
+    out << style.green(response.get("message", "Query OK").asString());
     if (!response["affected_rows"].isNull()) out << ", " << response["affected_rows"].asUInt64() << " rows affected";
     if (timing) out << " (" << std::fixed << std::setprecision(3) << response.get("execution_time_us", 0).asUInt64() / 1000000.0 << " sec)";
     out << '\n';
@@ -340,13 +345,32 @@ void render_table(const Json::Value &response, std::ostream &out, bool batch, bo
     vector<size_t> widths(columns.size(), 0);
     for (Json::ArrayIndex i = 0; i < columns.size(); ++i) widths[i] = columns[i]["name"].asString().size();
     for (const Json::Value &row : rows) for (Json::ArrayIndex i = 0; i < row.size() && i < widths.size(); ++i) widths[i] = std::max(widths[i], row[i].asString().size());
-    auto border = [&]() { out << '+'; for (size_t width : widths) out << string(width + 2, '-') << '+'; out << '\n'; };
-    border(); out << '|';
-    for (Json::ArrayIndex i = 0; i < columns.size(); ++i) out << ' ' << std::left << std::setw(widths[i]) << columns[i]["name"].asString() << " |";
-    out << '\n'; border();
-    for (const Json::Value &row : rows) { out << '|'; for (Json::ArrayIndex i = 0; i < columns.size(); ++i) out << ' ' << std::left << std::setw(widths[i]) << (i < row.size() ? row[i].asString() : "") << " |"; out << '\n'; }
+    auto border = [&]() {
+      std::ostringstream line;
+      line << '+';
+      for (size_t width : widths) line << string(width + 2, '-') << '+';
+      out << style.cyan(line.str()) << '\n';
+    };
     border();
-    out << rows.size() << (rows.size() == 1 ? " row" : " rows") << " in set";
+    out << style.cyan("|");
+    for (Json::ArrayIndex i = 0; i < columns.size(); ++i) {
+      string heading = columns[i]["name"].asString();
+      heading.append(widths[i] - heading.size(), ' ');
+      out << ' ' << style.bold(style.cyan(heading)) << ' ' << style.cyan("|");
+    }
+    out << '\n';
+    border();
+    for (const Json::Value &row : rows) {
+      out << style.cyan("|");
+      for (Json::ArrayIndex i = 0; i < columns.size(); ++i) {
+        string cell = i < row.size() ? row[i].asString() : "";
+        cell.append(widths[i] - cell.size(), ' ');
+        out << ' ' << (upper(trim(cell)) == "NULL" ? style.purple(cell) : cell) << ' ' << style.cyan("|");
+      }
+      out << '\n';
+    }
+    border();
+    out << style.green(std::to_string(rows.size()) + (rows.size() == 1 ? " row" : " rows") + " in set");
     if (timing) out << " (" << std::fixed << std::setprecision(3) << response.get("execution_time_us", 0).asUInt64() / 1000000.0 << " sec)";
     out << '\n';
   }
@@ -390,39 +414,50 @@ bool sensitive_sql(const string &sql)
   return normalized.find("IDENTIFIED BY") != string::npos || normalized.find("PASSWORD") != string::npos;
 }
 
+void print_client_logo(const tui::Capabilities &terminal, const tui::Style &style)
+{
+  if (terminal.layout() == tui::LayoutMode::MINIMAL || !terminal.unicode()) {
+    cout << style.bold(style.magenta("CSUDB 2026")) << '\n';
+    return;
+  }
+  if (terminal.layout() == tui::LayoutMode::COMPACT) {
+    cout << style.bold(style.magenta("CSUDB 2026")) << '\n'
+         << style.dim("Compiler · Database · Operating Systems") << "\n";
+    return;
+  }
+  static const char *logo[] = {
+      "  ██████╗███████╗██╗   ██╗██████╗ ██████╗ ",
+      " ██╔════╝██╔════╝██║   ██║██╔══██╗██╔══██╗",
+      " ██║     ███████╗██║   ██║██║  ██║██████╔╝",
+      " ██║     ╚════██║██║   ██║██║  ██║██╔══██╗",
+      " ╚██████╗███████║╚██████╔╝██████╔╝██████╔╝",
+      "  ╚═════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═════╝ "};
+  for (const char *line : logo) cout << style.magenta(line) << '\n';
+  cout << "\n" << style.bold(style.cyan("CSUDB 2026")) << '\n'
+       << style.dim("Compiler · Database · Operating Systems") << "\n";
+}
+
 void banner(const ClientOptions &options, const Json::Value &login)
 {
   if (options.silent) return;
-  cout << R"(   ██████╗███████╗██╗   ██╗██████╗ ██████╗
-  ██╔════╝██╔════╝██║   ██║██╔══██╗██╔══██╗
-  ██║     ███████╗██║   ██║██║  ██║██████╔╝
-  ██║     ╚════██║██║   ██║██║  ██║██╔══██╗
-  ╚██████╗███████║╚██████╔╝██████╔╝██████╔╝
-   ╚═════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═════╝
-
-                     CSUDB 2026
-
-         Compiler · Database · Operating System
-
-────────────────────────────────────────────────────
-)";
-  cout << " Server Version : CSUDB " << login["attributes"].get("version", CSUDB_VERSION_STRING).asString() << '\n'
-       << " Connection     : " << options.host << ':' << options.port << '\n'
-       << " User           : " << options.user << '\n'
-       << " Database       : " << (options.database.empty() ? "(none)" : options.database) << R"(
-
- SQL Engine     : READY
- Storage Engine : READY
- Buffer Pool    : READY
-
-────────────────────────────────────────────────────
-
- Welcome to the CSUDB monitor.
-
- Commands end with ';' or '\g'.
- Type '/help' for help. Type '/' then Tab to browse commands.
-
-)";
+  const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO, !options.no_color);
+  const tui::Style style(terminal.color());
+  print_client_logo(terminal, style);
+  const int rule_width = terminal.content_width(64, 0);
+  cout << style.dim(tui::repeat(terminal.unicode() ? "─" : "-", rule_width)) << "\n\n";
+  cout << style.cyan("Connection") << "\n\n";
+  auto field = [&](const string &label, const string &value) {
+    cout << "  " << style.cyan(label)
+         << string(static_cast<size_t>(std::max(1, 12 - static_cast<int>(label.size()))), ' ')
+         << style.white(tui::truncate_middle(value, static_cast<size_t>(std::max(12, rule_width - 16)))) << '\n';
+  };
+  field("Server", "CSUDB " + login["attributes"].get("version", CSUDB_VERSION_STRING).asString());
+  field("Host", options.host + ':' + std::to_string(options.port));
+  field("User", options.user);
+  field("Database", options.database.empty() ? "(none)" : options.database);
+  cout << "\n" << style.bold("Welcome to the CSUDB monitor.") << "\n\n"
+       << style.dim("Commands end with ';' or '\\g'.") << '\n'
+       << style.dim("Type '/help' for help. Use '/web' to open the Web Console.") << "\n\n";
 }
 
 const char *meta_help = R"(CSUDB shell commands:
@@ -556,7 +591,10 @@ public:
     login_request["type"] = "login"; login_request["user"] = options_.user; login_request["password"] = password; login_request["database"] = options_.database;
     if (!connection_.request(login_request, login_response, error)) { cerr << "ERROR: login request failed: " << error << '\n'; return 2; }
     password.assign(password.size(), '\0'); password.clear(); login_request["password"] = "";
-    if (!login_response.get("success", false).asBool()) { render_table(login_response, cerr, false, false); return 3; }
+    if (!login_response.get("success", false).asBool()) {
+      render_table(login_response, cerr, false, false, error_style());
+      return 3;
+    }
     if (options_.database.empty()) options_.database = login_response["attributes"].get("database", "sys").asString();
     banner(options_, login_response);
 
@@ -568,6 +606,15 @@ public:
 
 private:
   std::ostream &output() { return output_file_.is_open() ? output_file_ : cout; }
+  tui::Style result_style() const
+  {
+    if (output_file_.is_open() || options_.batch) return tui::Style(false);
+    return tui::Style(tui::Capabilities::detect(STDOUT_FILENO, !options_.no_color).color());
+  }
+  tui::Style error_style() const
+  {
+    return tui::Style(tui::Capabilities::detect(STDERR_FILENO, !options_.no_color).color());
+  }
 
   bool request(Json::Value &request, Json::Value &response)
   {
@@ -583,7 +630,7 @@ private:
     Json::Value request_value, response;
     request_value["type"] = "query"; request_value["sql"] = sql;
     if (!request(request_value, response)) return false;
-    render_table(response, output(), options_.batch, options_.timing);
+    render_table(response, output(), options_.batch, options_.timing, result_style());
     if (response.get("success", false).asBool() && response["attributes"].isMember("database")) options_.database = response["attributes"]["database"].asString();
     return response.get("success", false).asBool();
   }
@@ -608,9 +655,17 @@ private:
     request_value["type"] = pages ? "buffer_snapshot" : "server_info";
     request_value["limit"] = Json::UInt64(limit);
     if (!request(request_value, response)) return;
-    if (!response.get("success", false).asBool()) { render_table(response, cerr, false, false); return; }
-    for (const string &name : response["attributes"].getMemberNames()) output() << std::left << std::setw(22) << name << ": " << response["attributes"][name].asString() << '\n';
-    if (pages) render_table(response, output(), options_.batch, false);
+    if (!response.get("success", false).asBool()) {
+      render_table(response, cerr, false, false, error_style());
+      return;
+    }
+    const tui::Style style = result_style();
+    for (const string &name : response["attributes"].getMemberNames()) {
+      string label = name;
+      label.append(22 - std::min<size_t>(22, label.size()), ' ');
+      output() << style.cyan(label) << ": " << response["attributes"][name].asString() << '\n';
+    }
+    if (pages) render_table(response, output(), options_.batch, false, style);
   }
 
   bool dispatch_meta(const string &line, bool &quit)
@@ -703,7 +758,13 @@ private:
     bool quit = false;
     string sql;
     while (!quit) {
-      string prompt = sql.empty() ? "csudb [" + (options_.database.empty() ? "(none)" : options_.database) + "]> " : "    -> ";
+      const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO, !options_.no_color);
+      const tui::Style style(terminal.color());
+      const string database = options_.database.empty() ? "(none)" : options_.database;
+      const string symbol = terminal.unicode() ? "❯" : ">";
+      string prompt = sql.empty()
+          ? style.magenta("csudb") + " " + style.purple("[" + database + "]") + " " + style.cyan(symbol) + " "
+          : style.dim("    ->") + " ";
       string line = line_reader.my_readline(prompt, false);
       if (line_reader.eof()) break;
       if (line == "interrupted") { sql.clear(); cout << "^C\n"; continue; }
