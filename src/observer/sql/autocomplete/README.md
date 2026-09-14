@@ -70,6 +70,7 @@ csudb -h 127.0.0.1 -P 6789 -u root --complete "SELECT * FR"
 （非交互场景可用环境变量 `CSUDB_PASSWORD` 提供密码。）
 
 - 交互内：`/complete SELECT * FROM student W`
+- Web Console（`/api/complete`）：SQL 编辑器输入时下方弹出确定性候选下拉（`↑/↓` 选择，`Tab`/`Enter`/点击接受，`Esc` 关闭）；编辑器上方显示 `AI ⟶ ... (Tab 接受)` 的模型 ghost，候选下拉首项为带 `AI` 标签的模型补全。详见 `src/obclient/web/`。
 
 ## 配置
 
