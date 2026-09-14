@@ -64,6 +64,7 @@ struct ClientOptions
   int port = DEFAULT_PORT;
   string user = "root";
   string database;
+  string url;
   string profile;
   string config_path;
   bool prompt_password = false;
@@ -83,6 +84,7 @@ struct CliOverrides
   optional<int> port;
   optional<string> user;
   optional<string> database;
+  optional<string> url;
 };
 
 string trim(string value)
@@ -108,9 +110,11 @@ void usage(const char *program)
 {
   cout << CSUDB_PRODUCT_NAME << " native client " << CSUDB_VERSION_STRING << "\n"
        << "Usage: " << program << " [options] [database]\n\n"
-       << "Connection:\n"
-       << "  -h, --host HOST          Server host (default 127.0.0.1)\n"
-       << "  -P, --port PORT          Server port (default 6789)\n"
+        << "Connection:\n"
+        << "  -h, --host HOST          Server host (default 127.0.0.1)\n"
+        << "  -P, --port PORT          Server port (default 6789)\n"
+        << "  -U, --url URL            Server endpoint: host[:port], local or online\n"
+        << "                           e.g. 127.0.0.1:6789 | 117.50.163.43:8157\n"
        << "  -u, --user USER          Login user (default root)\n"
        << "  -p, --password           Prompt for password (never accepts a value)\n"
        << "  -D, --database DB        Initial database\n"
@@ -173,8 +177,47 @@ void apply_environment(ClientOptions &options)
   assign("CSUDB_HOST", options.host);
   assign("CSUDB_USER", options.user);
   assign("CSUDB_DATABASE", options.database);
+  assign("CSUDB_URL", options.url);
   const char *port = getenv("CSUDB_PORT");
   if (port != nullptr && *port != '\0') options.port = std::atoi(port);
+}
+
+// 解析统一服务地址：支持 host、host:port，可带 native:// / http(s):// 前缀与路径。
+// 例：127.0.0.1:6789（本地）、117.50.163.43:8157（线上）、http://host:port
+void apply_url(ClientOptions &options)
+{
+  if (options.url.empty()) {
+    return;
+  }
+  string value = options.url;
+  auto   scheme = value.find("://");
+  if (scheme != string::npos) {
+    value = value.substr(scheme + 3);
+  }
+  auto slash = value.find('/');
+  if (slash != string::npos) {
+    value = value.substr(0, slash);
+  }
+  if (value.empty()) {
+    return;
+  }
+  if (value.front() == '[') {  // IPv6 字面量 [::1]:6789
+    auto close = value.find(']');
+    if (close != string::npos) {
+      options.host = value.substr(1, close - 1);
+      if (close + 1 < value.size() && value[close + 1] == ':') {
+        options.port = std::atoi(value.substr(close + 2).c_str());
+      }
+      return;
+    }
+  }
+  auto colon = value.rfind(':');
+  if (colon != string::npos && colon + 1 < value.size()) {
+    options.host = value.substr(0, colon);
+    options.port = std::atoi(value.substr(colon + 1).c_str());
+  } else {
+    options.host = value;
+  }
 }
 
 bool parse_options(int argc, char **argv, ClientOptions &options)
@@ -185,11 +228,12 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
   const char *env_profile = getenv("CSUDB_PROFILE");
   if (env_profile != nullptr) options.profile = env_profile;
 
-  enum { OPT_PROFILE = 1000, OPT_CONFIG, OPT_BATCH, OPT_SILENT, OPT_NO_COLOR, OPT_PING, OPT_TABLE, OPT_HELP, OPT_VERSION, OPT_COMPLETE };
+  enum { OPT_PROFILE = 1000, OPT_CONFIG, OPT_BATCH, OPT_SILENT, OPT_NO_COLOR, OPT_PING, OPT_TABLE, OPT_HELP, OPT_VERSION, OPT_COMPLETE, OPT_URL };
   static option long_options[] = {{"host", required_argument, nullptr, 'h'}, {"port", required_argument, nullptr, 'P'},
       {"user", required_argument, nullptr, 'u'}, {"password", no_argument, nullptr, 'p'},
       {"database", required_argument, nullptr, 'D'}, {"execute", required_argument, nullptr, 'e'},
-      {"file", required_argument, nullptr, 'f'}, {"profile", required_argument, nullptr, OPT_PROFILE},
+      {"file", required_argument, nullptr, 'f'}, {"url", required_argument, nullptr, 'U'},
+      {"profile", required_argument, nullptr, OPT_PROFILE},
       {"config", required_argument, nullptr, OPT_CONFIG}, {"batch", no_argument, nullptr, OPT_BATCH},
       {"silent", no_argument, nullptr, OPT_SILENT}, {"no-color", no_argument, nullptr, OPT_NO_COLOR},
       {"ping", no_argument, nullptr, OPT_PING}, {"table", no_argument, nullptr, OPT_TABLE},
@@ -198,7 +242,7 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
 
   // First pass records command-line values; profile configuration is merged afterward.
   int option;
-  while ((option = getopt_long(argc, argv, "h:P:u:pD:e:f:", long_options, nullptr)) != -1) {
+  while ((option = getopt_long(argc, argv, "h:P:u:pD:e:f:U:", long_options, nullptr)) != -1) {
     switch (option) {
       case 'h': overrides.host = optarg; break;
       case 'P': overrides.port = std::atoi(optarg); break;
@@ -215,6 +259,7 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
       case OPT_PING: options.ping = true; options.silent = true; break;
       case OPT_TABLE: options.batch = false; break;
       case OPT_COMPLETE: options.complete_sql = optarg; options.silent = true; break;
+      case 'U': overrides.url = optarg; break;
       case OPT_HELP: usage(argv[0]); std::exit(0);
       case OPT_VERSION: cout << CSUDB_PRODUCT_NAME << " " << CSUDB_VERSION_STRING << endl; std::exit(0);
       default: return false;
@@ -232,6 +277,8 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
     apply_section(options, profile->second);
   }
   apply_environment(options);
+  if (overrides.url) options.url = *overrides.url;
+  if (!options.url.empty()) apply_url(options);
   if (overrides.host) options.host = *overrides.host;
   if (overrides.port) options.port = *overrides.port;
   if (overrides.user) options.user = *overrides.user;
