@@ -19,7 +19,6 @@ See the Mulan PSL v2 for more details. */
 #include "storage/record/record_manager.h"
 #include "storage/table/table.h"
 #include "storage/trx/mvcc_trx.h"
-#include "storage/trx/lsm_mvcc_trx.h"
 #include "storage/trx/trx.h"
 #include "storage/trx/vacuous_trx.h"
 
@@ -30,8 +29,6 @@ TrxKit *TrxKit::create(const char *name, Db* db)
     trx_kit = new VacuousTrxKit();
   } else if (0 == strcasecmp(name, "mvcc")) {
     trx_kit = new MvccTrxKit();
-  } else if (0 == strcasecmp(name, "lsm")) {
-    trx_kit = new LsmMvccTrxKit(db);
   } else {
     LOG_ERROR("unknown trx kit name. name=%s", name);
     return nullptr;

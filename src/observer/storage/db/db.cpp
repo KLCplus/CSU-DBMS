@@ -47,10 +47,6 @@ Db::~Db()
     log_handler_->await_termination();
     log_handler_.reset();
   }
-  if (lsm_) {
-    delete lsm_;
-    lsm_ = nullptr;
-  }
   LOG_INFO("Db has been closed: %s", name_.c_str());
 }
 
@@ -70,14 +66,9 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
     return RC::INVALID_ARGUMENT;
   }
 
-  oceanbase::ObLsmOptions options;
-  filesystem::path lsm_path = filesystem::path(dbpath) / "lsm";
-  filesystem::create_directory(lsm_path);
-
-  rc = oceanbase::ObLsm::open(options, lsm_path, &lsm_);
-  if (OB_FAIL(rc)) {
-    LOG_ERROR("failed to open lsm. dbpath=%s, rc=%s", dbpath, strrc(rc));
-    return rc;
+  if (!common::is_blank(storage_engine) && 0 != strcasecmp(storage_engine, "heap")) {
+    LOG_ERROR("Unsupported storage engine: %s. CSU-DBMS supports heap only", storage_engine);
+    return RC::INVALID_ARGUMENT;
   }
 
   TrxKit *trx_kit = TrxKit::create(trx_kit_name, this);
@@ -87,8 +78,6 @@ RC Db::init(const char *name, const char *dbpath, const char *trx_kit_name, cons
   }
 
   trx_kit_.reset(trx_kit);
-
-  storage_engine_ = storage_engine;
 
   BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU;
   if (!parse_buffer_pool_replacement_policy(buffer_pool_replacement_policy, replacement_policy)) {
@@ -198,7 +187,7 @@ RC Db::create_table(const char *table_name, span<const AttrInfoSqlNode> attribut
   Table  *table           = new Table();
   int32_t table_id        = next_table_id_++;
   rc = table->create(this, table_id, table_file_path.c_str(), table_name, path_.c_str(), attributes, primary_keys, storage_format,
-                     get_storage_engine());
+                     StorageEngine::HEAP);
   if (rc != RC::SUCCESS) {
     LOG_ERROR("Failed to create table %s.", table_name);
     delete table;

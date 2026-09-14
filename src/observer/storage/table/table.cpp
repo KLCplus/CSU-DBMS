@@ -31,9 +31,7 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/trx/trx.h"
 #include "storage/record/heap_record_scanner.h"
-#include "storage/record/lsm_record_scanner.h"
 #include "storage/table/heap_table_engine.h"
-#include "storage/table/lsm_table_engine.h"
 
 Table::~Table()
 {
@@ -108,8 +106,6 @@ RC Table::create(Db *db, int32_t table_id, const char *path, const char *name, c
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
-  } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
-    engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
   } else {
     rc = RC::UNSUPPORTED;
     LOG_WARN("Unsupported storage engine type: %d", table_meta_.storage_engine());
@@ -170,8 +166,6 @@ RC Table::open(Db *db, const char *meta_file, const char *base_dir)
 
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
-  }  else if (table_meta_.storage_engine() == StorageEngine::LSM) {
-    engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
   } else {
     rc = RC::UNSUPPORTED;
     LOG_ERROR("Unsupported storage engine type: %d", table_meta_.storage_engine());
@@ -198,8 +192,6 @@ RC Table::open_engine()
 {
   if (table_meta_.storage_engine() == StorageEngine::HEAP) {
     engine_ = make_unique<HeapTableEngine>(&table_meta_, db_, this);
-  } else if (table_meta_.storage_engine() == StorageEngine::LSM) {
-    engine_ = make_unique<LsmTableEngine>(&table_meta_, db_, this);
   } else {
     LOG_ERROR("Unsupported storage engine type: %d", table_meta_.storage_engine());
     return RC::UNSUPPORTED;

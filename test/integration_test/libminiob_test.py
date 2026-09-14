@@ -275,7 +275,7 @@ def __init_options(argv = sys.argv[1:]):
     parser.add_option('-l', '--log', action='store', dest='log', default=None)
     parser.add_option('', '--task-id', action='store', dest='task_id', default='default')
     parser.add_option('', '--player', action='store', dest='player', default='default_player')
-    parser.add_option('', '--repo', action='store', dest='repo', default='https://github.com/oceanbase/miniob')
+    parser.add_option('', '--repo', action='store', dest='repo', default='https://github.com/KLCplus/CSU-DBMS')
     parser.add_option('', '--branch', action='store', dest='branch', default='main')
     parser.add_option('', '--commit-id', action='store', dest='commit_id', default='')
     parser.add_option('', '--no-cleanup', action='store_true', dest='no_cleanup',
