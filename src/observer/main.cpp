@@ -16,6 +16,7 @@
 #include "common/os/process.h"
 #include "common/os/signal.h"
 #include "common/log/log.h"
+#include "common/terminal/terminal_ui.h"
 #include "common/version.h"
 #include "net/server.h"
 #include "net/server_param.h"
@@ -118,6 +119,7 @@ void usage(const char *program)
   cout << "      --data-dir DIR         Override the stable database data directory" << endl;
   cout << "      --log-dir DIR          Log directory" << endl;
   cout << "      --foreground           Run in foreground (default)" << endl;
+  cout << "      --no-color             Disable ANSI color" << endl;
   cout << "  -P, --protocol MODE        native, plain, cli, or mysql" << endl;
   cout << "  -s, --socket PATH          Unix socket path" << endl;
   cout << "  -t, --transaction MODEL    vacuous or mvcc" << endl;
@@ -151,6 +153,7 @@ void parse_parameter(int argc, char **argv)
   constexpr int OPT_LOG_DIR = 1003;
   constexpr int OPT_INITIALIZE = 1004;
   constexpr int OPT_FOREGROUND = 1005;
+  constexpr int OPT_NO_COLOR = 1006;
   static option long_options[] = {{"help", no_argument, nullptr, 'h'},
       {"version", no_argument, nullptr, 'v'},
       {"config", required_argument, nullptr, 'f'},
@@ -167,6 +170,7 @@ void parse_parameter(int argc, char **argv)
       {"log-dir", required_argument, nullptr, OPT_LOG_DIR},
       {"initialize", no_argument, nullptr, OPT_INITIALIZE},
       {"foreground", no_argument, nullptr, OPT_FOREGROUND},
+      {"no-color", no_argument, nullptr, OPT_NO_COLOR},
       {"durable", no_argument, nullptr, 'd'},
       {"engine", required_argument, nullptr, 'E'},
       {nullptr, 0, nullptr, 0}};
@@ -191,6 +195,7 @@ void parse_parameter(int argc, char **argv)
       case OPT_LOG_DIR: process_param->set_log_dir(optarg); break;
       case OPT_INITIALIZE: process_param->set_initialize(true); break;
       case OPT_FOREGROUND: process_param->set_demon(false); break;
+      case OPT_NO_COLOR: setenv("NO_COLOR", "1", 1); break;
       case 'd': process_param->set_durability_mode("disk"); break;
       case 'h':
         usage(argv[0]);
@@ -303,37 +308,115 @@ void quit_signal_handle(int signum)
   pthread_create(&tid, nullptr, quit_thread_func, (void *)(intptr_t)signum);
 }
 
+namespace tui = common::terminal;
+
+void print_centered(const tui::Style &style, const string &line, int width, bool brand = false)
+{
+  const int padding = std::max(0, (width - tui::display_width(line)) / 2);
+  cout << string(static_cast<size_t>(padding), ' ') << (brand ? style.magenta(line) : style.cyan(line)) << '\n';
+}
+
+void print_server_logo(const tui::Capabilities &terminal, const tui::Style &style)
+{
+  const int width = terminal.content_width(112, 1);
+  if (terminal.layout() == tui::LayoutMode::MINIMAL || !terminal.unicode()) {
+    cout << style.bold(style.magenta("CSUDB 2026")) << '\n' << style.dim("Database Server") << "\n\n";
+    return;
+  }
+  if (terminal.layout() == tui::LayoutMode::COMPACT) {
+    print_centered(style, "CSUDB 2026", width, true);
+    print_centered(style, "Database Server", width);
+    cout << '\n';
+    return;
+  }
+
+  static const char *logo[] = {
+      "  ██████╗███████╗██╗   ██╗██████╗ ██████╗ ",
+      " ██╔════╝██╔════╝██║   ██║██╔══██╗██╔══██╗",
+      " ██║     ███████╗██║   ██║██║  ██║██████╔╝",
+      " ██║     ╚════██║██║   ██║██║  ██║██╔══██╗",
+      " ╚██████╗███████║╚██████╔╝██████╔╝██████╔╝",
+      "  ╚═════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═════╝ "};
+  for (const char *line : logo) print_centered(style, line, width, true);
+  print_centered(style, "CSUDB 2026 · DATABASE SERVER", width);
+  cout << '\n';
+}
+
+void print_runtime_panel(const tui::Capabilities &terminal, const tui::Style &style)
+{
+  ProcessParam *parameter = the_process_param();
+  const int port = parameter->get_server_port() > 0 ? parameter->get_server_port() : PORT_DEFAULT;
+  const int panel_width = terminal.content_width(76, 1);
+  const int inner = panel_width - 2;
+  const bool unicode = terminal.unicode();
+  const string horizontal = tui::repeat(unicode ? "─" : "-", inner);
+  const string top = unicode ? "┌" + horizontal + "┐" : "+" + horizontal + "+";
+  const string bottom = unicode ? "└" + horizontal + "┘" : "+" + horizontal + "+";
+  const string vertical = unicode ? "│" : "|";
+  cout << style.cyan(top) << '\n';
+  auto row = [&](const string &label, const string &value, bool starting = false) {
+    const int value_width = std::max(1, inner - 18);
+    const string rendered = tui::truncate_middle(value, static_cast<size_t>(value_width));
+    cout << style.cyan(vertical) << ' ' << style.cyan(tui::truncate_middle(label, 15))
+         << string(static_cast<size_t>(std::max(1, 16 - static_cast<int>(label.size()))), ' ');
+    cout << (starting ? style.yellow(rendered) : style.white(rendered))
+         << string(static_cast<size_t>(std::max(0, value_width - static_cast<int>(rendered.size()))), ' ')
+         << ' ' << style.cyan(vertical) << '\n';
+  };
+  const string title = " Runtime Information ";
+  cout << style.cyan(unicode ? "├─" : "+-") << style.bold(style.cyan(title))
+       << style.cyan(tui::repeat(unicode ? "─" : "-", inner - static_cast<int>(title.size()) - 1))
+       << style.cyan(unicode ? "┤" : "+") << '\n';
+  row("Mode", parameter->initialize() ? "Data Directory Initialization" : "Database Server");
+  row("Protocol", parameter->get_protocol());
+  row("Listen", parameter->listen_host() + ":" + std::to_string(port));
+  row("Data directory", tui::display_path(parameter->data_dir(), static_cast<size_t>(std::max(1, inner - 18))));
+  row("Status", "STARTING", true);
+  cout << style.cyan(bottom) << "\n\n";
+}
+
+void print_startup_step(const string &description)
+{
+  const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO);
+  const tui::Style style(terminal.color());
+  const string mark = terminal.unicode() ? "✓" : "[OK]";
+  const string timestamp = "[" + tui::current_time_hms() + "]";
+  const int available = std::max(8, terminal.width() - tui::display_width(timestamp) -
+      tui::display_width(mark) - 3);
+  cout << style.dim(timestamp) << "  " << style.green(mark) << ' '
+       << style.white(tui::truncate_middle(description, static_cast<size_t>(available))) << '\n';
+}
+
 void print_startup_screen()
 {
-  cout << R"(
-╭──────────────────────────────────────────────────────────╮
-│                       CSUDB 2026                         │
-│       Compiler × Database × Operating Systems            │
-╰──────────────────────────────────────────────────────────╯
-)";
-
-  ProcessParam *parameter = the_process_param();
-  if (strcasecmp(parameter->get_protocol().c_str(), "cli") == 0) {
-    cout << " Mode           : Embedded CLI" << endl;
-    cout << " Data directory : " << parameter->data_dir() << endl;
-    cout << " Status         : READY" << endl << endl;
-    cout << "Ready. Enter SQL directly (a trailing ';' is recommended)." << endl;
-    cout << "Type 'help;' for SQL examples; type 'exit' or '\\q' to leave." << endl;
-  } else {
-    const int port = parameter->get_server_port() > 0 ? parameter->get_server_port() : PORT_DEFAULT;
-    const string client_host = parameter->listen_host() == "0.0.0.0" ? "127.0.0.1" : parameter->listen_host();
-    cout << " Mode           : Database Server" << endl;
-    cout << " Protocol       : " << parameter->get_protocol() << endl;
-    cout << " Listen         : " << parameter->listen_host() << ':' << port << endl;
-    cout << " Data directory : " << parameter->data_dir() << endl;
-    cout << " Status         : STARTING" << endl;
-    cout << "────────────────────────────────────────────────────────────" << endl;
-    cout << " Connect        : csudb -h " << client_host << " -P " << port << " -u root -p" << endl;
-    if (strcasecmp(parameter->get_protocol().c_str(), "native") == 0) {
-      cout << " Web Console    : connect with csudb, then enter /web" << endl;
-    }
-    cout << " Stop           : Ctrl+C (graceful shutdown)" << endl << endl;
+  const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO);
+  const tui::Style style(terminal.color());
+  const string dot = terminal.unicode() ? "●" : "*";
+  const int width = terminal.content_width(112, 1);
+  cout << style.green(dot) << ' ' << style.bold(style.magenta("CSUDB Server"));
+  if (width >= 66) {
+    cout << style.dim("  Database Engine Runtime")
+         << string(static_cast<size_t>(std::max(1, width - 58)), ' ');
   }
+  cout << ' ' << style.purple("v" CSUDB_VERSION_STRING) << "\n\n";
+  print_server_logo(terminal, style);
+  print_runtime_panel(terminal, style);
+}
+
+void print_ready_screen()
+{
+  ProcessParam *parameter = the_process_param();
+  if (strcasecmp(parameter->get_protocol().c_str(), "cli") == 0) return;
+  const tui::Capabilities terminal = tui::Capabilities::detect(STDOUT_FILENO);
+  const tui::Style style(terminal.color());
+  const string mark = terminal.unicode() ? "✓" : "[OK]";
+  const int port = parameter->get_server_port() > 0 ? parameter->get_server_port() : PORT_DEFAULT;
+  const string host = parameter->listen_host() == "0.0.0.0" ? "127.0.0.1" : parameter->listen_host();
+  print_startup_step("TCP listener active on " + parameter->listen_host() + ':' + std::to_string(port));
+  cout << '\n' << style.bold(style.green(mark + " Ready for client connections.")) << "\n\n";
+  cout << style.cyan("Quick Connect") << "\n\n  "
+       << style.magenta("csudb") << " -h " << style.cyan(host) << " -P " << style.cyan(std::to_string(port))
+       << " -u root -p\n\n" << style.dim("Ctrl+C to shutdown.") << "\n\n" << std::flush;
 }
 
 int main(int argc, char **argv)
@@ -365,6 +448,7 @@ int main(int argc, char **argv)
     cleanup();
     return rc;
   }
+  print_startup_step("Runtime and configuration initialized");
 
   string temporary_root_password;
   bool catalog_created = false;
@@ -409,12 +493,15 @@ int main(int argc, char **argv)
     cleanup();
     return 1;
   }
+  print_startup_step("System catalog and storage engine loaded");
 
   g_server = init_server();
   if (g_server == nullptr) {
     cleanup();
     return 1;
   }
+  print_startup_step("Network runtime initialized");
+  g_server->set_ready_callback(print_ready_screen);
   g_server->serve();
 
   LOG_INFO("Server stopped");

@@ -258,6 +258,7 @@ int NetServer::serve()
     LOG_PANIC("Failed to start network");
     exit(-1);
   }
+  notify_ready();
 
   if (!server_param_.use_std_io) {
     struct pollfd poll_fd;
@@ -324,6 +325,7 @@ int CliServer::serve()
   }
 
   started_ = true;
+  notify_ready();
 
   SqlTaskHandler task_handler;
   while (started_ && !communicator.exit()) {

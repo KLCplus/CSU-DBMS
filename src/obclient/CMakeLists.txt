@@ -31,9 +31,11 @@ INSTALL(TARGETS csudb RUNTIME DESTINATION bin)
 # after cmake --install. Both helpers use only the Python standard library.
 CONFIGURE_FILE(web/csudb_web.py ${PROJECT_BINARY_DIR}/bin/csudb-web.py COPYONLY)
 CONFIGURE_FILE(web/index.html ${PROJECT_BINARY_DIR}/bin/index.html COPYONLY)
+CONFIGURE_FILE(web/app.css ${PROJECT_BINARY_DIR}/bin/app.css COPYONLY)
+CONFIGURE_FILE(web/app.js ${PROJECT_BINARY_DIR}/bin/app.js COPYONLY)
 CONFIGURE_FILE(${PROJECT_SOURCE_DIR}/sdk/python/csudb.py ${PROJECT_BINARY_DIR}/bin/csudb.py COPYONLY)
 INSTALL(PROGRAMS web/csudb_web.py DESTINATION libexec/csudb RENAME csudb-web)
-INSTALL(FILES web/index.html ${PROJECT_SOURCE_DIR}/sdk/python/csudb.py DESTINATION libexec/csudb)
+INSTALL(FILES web/index.html web/app.css web/app.js ${PROJECT_SOURCE_DIR}/sdk/python/csudb.py DESTINATION libexec/csudb)
 INSTALL(FILES ${PROJECT_SOURCE_DIR}/sdk/python/csudb.py
     ${PROJECT_SOURCE_DIR}/sdk/python/__init__.py
     ${PROJECT_SOURCE_DIR}/sdk/python/README.md

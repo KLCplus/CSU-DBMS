@@ -22,9 +22,10 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 
 - `csudb`：带多行 SQL、表格输出、状态诊断和智能补全的终端客户端；
 - `/web`：从 CLI 启动只监听本机的可视化控制台；
-- `sdk/python/csudb.py`：面向开发者的 Python DB-API 风格接口。
+- `sdk/java`：基于 Native 协议的标准 `java.sql` JDBC 驱动；
+- `sdk/python/csudb.py`：面向脚本的 Python DB-API 风格接口。
 
-三者都复用 Native 协议与 `DatabaseService`。已有 MySQL communicator 保留为
+这些入口都复用 Native 协议与 `DatabaseService`。已有 MySQL communicator 保留为
 Experimental Compatibility Layer，可用于 Connector/J 兼容实验，但不宣称完整
 MySQL/JDBC 兼容。
 
@@ -342,7 +343,7 @@ build_debug/bin/csudbd \
 build_debug/bin/csudb -h 127.0.0.1 -P 6789 -u root -p
 ```
 
-连接后显示 CSUDB 2026 欢迎页和 `csudb [sys]>` 提示符。SQL 支持多行输入，以字符串外的 `;` 或 `\g` 提交；输入 `/` 后按 Tab 浏览命令，输入 `/help` 查看帮助，输入 `/quit` 退出。命令支持前缀补全和拼写候选。
+连接后显示 CSUDB 2026 欢迎页和 `csudb [sys] ❯` 提示符。SQL 支持多行输入，以字符串外的 `;` 或 `\g` 提交；输入 `/` 后按 Tab 浏览命令，输入 `/help` 查看帮助，输入 `/quit` 退出。命令支持前缀补全和拼写候选。
 
 OS 缓存实验参数属于服务端。例如 32 个 8 KiB Frame、CLOCK 和 positional I/O：
 
@@ -356,6 +357,9 @@ build_debug/bin/csudbd --data-dir /tmp/csudb-data \
 ```bash
 cmake --install build_debug --prefix "$HOME/.local"
 # 或：CSUDB_BUILD_DIR="$PWD/build_debug" ./scripts/install.sh --user
+
+# 开发机推荐：全局命令软链接到 build_debug，之后每次编译自动更新
+./scripts/install.sh --dev
 ```
 
 `--replacement` 支持 `lru`（默认）、`fifo` 和 `clock`；`--io-backend` 支持 `legacy`（默认，`lseek + read/write`）和 `positional`（可靠循环的 `pread/pwrite`）。名称大小写不敏感，未知值告警后分别回退 LRU/legacy。

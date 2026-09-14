@@ -14,6 +14,8 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+#include <functional>
+
 #include "net/server_param.h"
 
 class Communicator;
@@ -33,9 +35,12 @@ public:
 
   virtual int  serve()    = 0;
   virtual void shutdown() = 0;
+  void set_ready_callback(std::function<void()> callback) { ready_callback_ = std::move(callback); }
 
 protected:
+  void notify_ready() const { if (ready_callback_) ready_callback_(); }
   ServerParam server_param_;  ///< 服务启动参数
+  std::function<void()> ready_callback_;
 };
 
 class NetServer : public Server

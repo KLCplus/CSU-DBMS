@@ -5,18 +5,25 @@ set -euo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
 BUILD_DIR="${CSUDB_BUILD_DIR:-${PROJECT_ROOT}/build_release}"
+DEVELOPMENT_LINKS=0
 
 usage()
 {
-  echo "Usage: $0 --user | --system"
+  echo "Usage: $0 --user | --system | --dev"
   echo "  --user    install below ~/.local"
   echo "  --system  install below /usr/local (normally run through sudo)"
+  echo "  --dev     install support files below ~/.local and link commands to build_debug"
   echo "CSUDB_BUILD_DIR and CSUDB_INSTALL_PREFIX may override the defaults."
 }
 
 case "${1:-}" in
   --user) PREFIX="${CSUDB_INSTALL_PREFIX:-${HOME}/.local}" ;;
   --system) PREFIX="${CSUDB_INSTALL_PREFIX:-/usr/local}" ;;
+  --dev)
+    PREFIX="${CSUDB_INSTALL_PREFIX:-${HOME}/.local}"
+    BUILD_DIR="${CSUDB_BUILD_DIR:-${PROJECT_ROOT}/build_debug}"
+    DEVELOPMENT_LINKS=1
+    ;;
   -h|--help) usage; exit 0 ;;
   *) usage >&2; exit 2 ;;
 esac
@@ -28,5 +35,11 @@ if [[ ! -x "${BUILD_DIR}/bin/csudb" || ! -x "${BUILD_DIR}/bin/csudbd" ]]; then
 fi
 
 cmake --install "${BUILD_DIR}" --prefix "${PREFIX}"
+if [[ "${DEVELOPMENT_LINKS}" -eq 1 ]]; then
+  mkdir -p "${PREFIX}/bin"
+  ln -sfn "${BUILD_DIR}/bin/csudb" "${PREFIX}/bin/csudb"
+  ln -sfn "${BUILD_DIR}/bin/csudbd" "${PREFIX}/bin/csudbd"
+  echo "Development links now follow ${BUILD_DIR}/bin."
+fi
 echo "CSUDB installed below ${PREFIX}."
 echo "Ensure ${PREFIX}/bin is present in PATH."
