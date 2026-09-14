@@ -30,3 +30,6 @@ const char *attr_type_to_string(AttrType type);
 AttrType    attr_type_from_string(const char *s);
 bool        is_numerical_type(AttrType type);
 bool        is_string_type(AttrType type);
+
+/// 面向用户报错展示的类型名，例如 INT / VARCHAR / BOOL，便于语义错误阅读
+const char *attr_type_to_sql_string(AttrType type);

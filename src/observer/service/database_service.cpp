@@ -16,6 +16,11 @@
 #include "event/sql_event.h"
 #include "net/communicator.h"
 #include "session/session.h"
+#include "sql/autocomplete/completion_engine.h"
+#include "sql/autocomplete/completion_types.h"
+#include "sql/autocomplete/llama_completion_client.h"
+#include "sql/autocomplete/model_completion_provider.h"
+#include "sql/autocomplete/sql_completion_config.h"
 #include "storage/os/buffer/disk_buffer_pool.h"
 #include "storage/db/db.h"
 #include "storage/default/default_handler.h"
@@ -23,7 +28,22 @@
 namespace {
 
 SystemCatalog product_catalog;
-std::mutex database_admin_mutex;
+std::mutex    database_admin_mutex;
+
+// 进程级单例：确定性补全随时可用，模型 provider 按配置可选
+CompletionEngine &completion_engine()
+{
+  static CompletionEngine engine = []() {
+    SqlCompletionConfig config = SqlCompletionConfig::load();
+    std::shared_ptr<ModelCompletionProvider> model;
+    if (config.enabled && config.model_enabled) {
+      auto client = std::make_shared<LlamaCompletionClient>(config.llama_base_url, config.model_http_timeout_ms);
+      model = std::make_shared<ModelCompletionProvider>(client, config);
+    }
+    return CompletionEngine(model);
+  }();
+  return engine;
+}
 
 string trim(string value)
 {
@@ -333,6 +353,36 @@ QueryResult DatabaseService::materialize(SessionEvent &event, RC pipeline_rc)
   return result;
 }
 
+QueryResult DatabaseService::complete_sql(SessionEvent &event)
+{
+  Session *session = event.session();
+  Db      *db      = session == nullptr ? nullptr : session->get_current_db();
+  if (db == nullptr) {
+    return QueryResult::error(RC::SCHEMA_DB_NOT_EXIST, "no database selected");
+  }
+
+  CompletionRequest request;
+  request.sql                   = event.completion_sql();
+  request.cursor_offset         = event.completion_cursor();
+  request.max_items             = event.completion_max_items();
+  request.want_model_completion = event.completion_want_model();
+
+  CompletionResponse response = completion_engine().complete(db, request);
+
+  QueryResult result = QueryResult::ok("Completion OK");
+  result.columns     = {{"insert_text", "VARCHAR"}, {"display_text", "VARCHAR"}, {"kind", "VARCHAR"},
+                        {"source", "VARCHAR"}, {"replace_start", "INT"}, {"replace_end", "INT"}, {"score", "VARCHAR"},
+                        {"detail", "VARCHAR"}};
+  for (const CompletionItem &item : response.items) {
+    result.rows.push_back({item.insert_text, item.display_text, completion_kind_name(item.kind),
+        completion_source_name(item.source), std::to_string(item.replace_start), std::to_string(item.replace_end),
+        std::to_string(item.score), item.detail});
+  }
+  result.attributes.push_back({"ghost_text", response.ghost_text});
+  result.attributes.push_back({"model_used", response.model_used ? "true" : "false"});
+  return result;
+}
+
 QueryResult DatabaseService::execute_sql(SessionEvent &event)
 {
   bool handled = false;
@@ -433,6 +483,10 @@ QueryResult DatabaseService::execute(SessionEvent &event)
       break;
     case ClientRequestType::QUERY:
       result = session.authenticated() ? execute_sql(event) : QueryResult::error(RC::AUTHENTICATION_FAILED, "authentication required");
+      break;
+    case ClientRequestType::COMPLETE:
+      result = session.authenticated() ? complete_sql(event)
+                                       : QueryResult::error(RC::AUTHENTICATION_FAILED, "authentication required");
       break;
   }
   result.execution_time_us = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count();

@@ -69,6 +69,9 @@ public:
 
   void set_predicates(vector<unique_ptr<Expression>> &&exprs);
 
+  // 投影裁剪：只扫描并向上层输出这些字段
+  void set_used_fields(vector<const FieldMeta *> &&fields) { used_fields_ = std::move(fields); }
+
 private:
   RC filter(RowTuple &tuple, bool &result);
 
@@ -80,4 +83,5 @@ private:
   Record                         current_record_;
   RowTuple                       tuple_;
   vector<unique_ptr<Expression>> predicates_;  // TODO chang predicate to table tuple filter
+  vector<const FieldMeta *>      used_fields_;  ///< 投影裁剪后的字段集合，为空表示读取全部字段
 };

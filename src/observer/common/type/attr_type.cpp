@@ -41,3 +41,17 @@ bool is_string_type(AttrType type)
 {
   return (type == AttrType::CHARS);
 }
+
+const char *attr_type_to_sql_string(AttrType type)
+{
+  switch (type) {
+    case AttrType::UNDEFINED: return "UNDEFINED";
+    case AttrType::CHARS: return "VARCHAR";
+    case AttrType::INTS: return "INT";
+    case AttrType::FLOATS: return "FLOAT";
+    case AttrType::VECTORS: return "VECTOR";
+    case AttrType::BOOLEANS: return "BOOL";
+    case AttrType::DATES: return "DATE";
+    default: return "UNKNOWN";
+  }
+}

@@ -9,7 +9,8 @@ typedef int yy_size_t;
 
 /* 参考生成的lex_sql.cpp代码，这个宏定义会放在每次运行yylex()最开始的地方 */
 #define YY_USER_INIT                                         \
-  yycolumn = 0;
+  yylineno = 1;                                              \
+  yycolumn = 1;
 
 /* 参考生成的lex_sql.cpp代码，这个宏定义会放在解析一个token之后，也可以在网上找到大量的参考资料 */
 /* 我们在这里设置当前解析的token的位置信息，这样在yacc中就可以使用这些信息了 */
@@ -56,6 +57,8 @@ extern double atof();
 %option noinput
 %option bison-bridge
 %option reentrant
+/* 跟踪行号，配合 YY_USER_ACTION 输出 <行,列> */
+%option yylineno
 /* 不区分大小写 */
 %option case-insensitive
 %option bison-locations
@@ -77,7 +80,7 @@ QUOTE            [\'\"]
 %%
 
 {WHITE_SPACE}                                        // ignore whitespace
-\n                                                   ;
+\n                                                   { yycolumn = 1; }
 "--"[^\n]*                                           ;
 "/*"                                                 { BEGIN(COMMENT); }
 <COMMENT>"*/"                                        { BEGIN(INITIAL); }
@@ -108,6 +111,7 @@ CALC                                    RETURN_TOKEN(CALC);
 FROM                                    RETURN_TOKEN(FROM);
 WHERE                                   RETURN_TOKEN(WHERE);
 AND                                     RETURN_TOKEN(AND);
+OR                                      RETURN_TOKEN(OR);
 INSERT                                  RETURN_TOKEN(INSERT);
 INTO                                    RETURN_TOKEN(INTO);
 VALUES                                  RETURN_TOKEN(VALUES);
@@ -158,8 +162,8 @@ ENCLOSED                                RETURN_TOKEN(ENCLOSED);
 "-" |
 "*" |
 "/"                                     { return yytext[0]; }
-\"[^"]*\"                               yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
-'[^']*\'                                yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
+\"([^"\\]|\\.|\"\")*\"                   yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
+\'([^'\\]|\\.|\'\')*\'                   yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 
 .                                       LOG_DEBUG("Unknown character [%c]",yytext[0]); return yytext[0];
 %%
