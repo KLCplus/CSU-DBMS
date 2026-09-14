@@ -53,7 +53,7 @@ SQL 文本
 | INSERT 逐列 TypeMismatch 报告 | ✅ 已实现（含列清单） | §8.4 |
 | 类型一致性严格校验 | ✅ 已实现 | §5.3、§8.3 |
 | 语法 `expected:` 期望集合 | ✅ 已实现 | §7.4 |
-| SQL 输入自动补全 | ✅ 新增 | §18 |
+| SQL 输入自动补全 | ✅ 新增（CLI + Web，确定性 + 可选 FIM 模型） | §18 |
 | 自动化测试集 | ✅ 新增 | §14 |
 
 > 本版状态：必备能力、进阶能力、词法/语法/语义关键要求均已实现；另修复了词法器缺 `OR`、NOT 优先级、标识符大小写、空字符串崩溃、多余右括号、一元负号、NOT 布尔比较、NULL 分组、UPDATE NULL 位图、OR 谓词下推等基础缺陷。
@@ -537,7 +537,7 @@ ctest -R autocomplete_test
 | INSERT 逐列 TypeMismatch | ✅ | `stmt/insert_stmt.cpp::InsertStmt::create` |
 | 类型一致性严格校验 | ✅ | `parser/expression_binder.cpp::bind_arithmetic_expression` |
 | 语法 `expected:` 集合 | ✅ | `parser/yacc_sql.y::yyreport_syntax_error` + `%define parse.error custom` |
-| SQL 输入补全 | ✅ | `sql/autocomplete/*`、`service/database_service.cpp::complete_sql`、`obclient/client.cpp` |
+| SQL 输入补全 | ✅ | `sql/autocomplete/*`、`service/database_service.cpp::complete_sql`、`obclient/client.cpp`、`obclient/web/*`（`/api/complete` + 候选下拉 + AI ghost） |
 | 自动化测试集 | ✅ | `SQL_description/test/`、`unittest/observer/autocomplete_test.cpp` |
 
 ---
@@ -639,7 +639,7 @@ ctest -R autocomplete_test
 5. `complete_grammar`：把期望符号映射为关键字/运算符/类型；并用**同一个 Parser 试探**确认续写关键字（`SELECT * FROM t ` → `WHERE/GROUP/ORDER/JOIN` 等）。关键字大小写跟随用户语句风格。
 6. `complete_catalog`：`FROM/JOIN/INSERT INTO` 后给表；`SELECT/WHERE/ON/GROUP/ORDER` 给 scope 列；`INSERT INTO t(` 给列；`t.` 给限定列；`CREATE TABLE` 给真实类型。
 7. 按 `score`（试探确认关键字 > Catalog > 期望集合）+ 名称排序、去重、截断到 `max_items`。
-8. 可选模型：`ModelCompletionProvider` 生成 ghost text，经 `ModelCompletionValidator` 校验后返回。
+8. 可选模型：`ModelCompletionProvider` 生成 ghost text，经 `ModelCompletionValidator` 校验后返回。触发策略：仅当确定性结果恰为**唯一关键字**（如 `SEL`→`SELECT`、`FR`→`FROM`）时跳过模型；列/表候选、运算符上下文等均允许模型给出 ghost。
 
 ### 18.4 能力门禁（`SqlCapabilities`）
 
@@ -653,11 +653,14 @@ ctest -R autocomplete_test
 - 客户端：`LlamaCompletionClient`（`health` 带 TTL、HTTP deadline、失败静默）；超时/不可用丢弃。
 - 校验：`ModelCompletionValidator::validate` = 清洗（去掉 Markdown 围栏/FIM 特殊 token/解释性前缀）→ 长度限制 → 方言白名单截断 → Parser 校验（最长合法前缀）→ Catalog 校验（`t.c` 必须存在）。
 - P40：CUDA 12.x / `CMAKE_CUDA_ARCHITECTURES=61` / `GGML_CUDA_FORCE_MMQ=ON`；见 `scripts/build_llama_p40.sh`、`scripts/run_sql_completion_model.sh`。
+- 实测部署：Tesla P40（sm_61，CUDA 13 已不支持 Pascal，故安装 CUDA 12.4）→ 编译 llama.cpp → 本地 `Qwen2.5-Coder-1.5B Q8_0 GGUF` → `llama-server` 监听 `127.0.0.1:8012`；`/infill` 正常，DB 端 ghost 延迟约 100–300ms。`run_sql_completion_model.sh` 支持本地 GGUF（`SQL_COMPLETION_MODEL_FILE`）或 `-hf` 下载。
 
 ### 18.6 协议与客户端
 
 - native 协议新增 `complete` 请求：`{type, sql, cursor, max_items, want_model}`；响应用通用结果结构承载候选（8 列行）与 `attributes.ghost_text/model_used`。
-- 客户端 `obclient/client.cpp`：replxx Tab 触发确定性补全、ghost text hint；`--complete "SQL"` 与 `/complete SQL` 用于演示。
+- 服务端：`service/database_service.cpp::DatabaseService::complete_sql`（进程级 `CompletionEngine` 单例）。
+- CLI：`obclient/client.cpp` replxx Tab 触发确定性补全、ghost text hint；`--complete "SQL"` 与 `/complete SQL` 用于演示。
+- Web Console：`obclient/web/csudb_web.py` 提供 `POST /api/complete`（`X-CSUDB-Session`/Cookie 鉴权）；`app.js` 在 SQL 编辑器上实现候选下拉 + AI ghost（下拉首项为带 `AI` 标签的模型补全，编辑器上方显示 `AI ⟶ ... (Tab 接受)`，Tab/Enter/点击接受），候选/ghost 分别来自确定性补全与模型。
 - 配置：`etc/sql_completion.json`（`enabled/model_enabled/llama_base_url/timeout/max_*` 等），支持环境变量 `CSUDB_SQL_COMPLETION_CONFIG`。
 
 ---
