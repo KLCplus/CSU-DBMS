@@ -4,6 +4,12 @@ CSUDB 是一个紧凑型关系数据库系统，集成 SQL 编译器、查询优
 
 产品命令统一为客户端 `csudb` 和服务端 `csudbd`。外部接入统一经过 `DatabaseService → Session/Auth → SQLTaskHandler → SQL Engine`，不会复制第二套 Parser 或 Executor。
 
+统一组件文档：
+
+- [`docs/components/PRODUCT_INTERFACES.md`](docs/components/PRODUCT_INTERFACES.md)：CLI、Web、Native 服务、Python 与 JDBC。
+- [`docs/components/OS_STORAGE.md`](docs/components/OS_STORAGE.md)：Page、Buffer Pool、替换策略、I/O、诊断与持久化。
+
+
 快速启动：
 
 ```bash
