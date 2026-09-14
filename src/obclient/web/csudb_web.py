@@ -138,6 +138,10 @@ class Handler(BaseHTTPRequestHandler):
         return value
 
     def _session_token(self) -> str:
+        # 自定义请求头优先（适配嵌入式预览/iframe 等 Cookie 受限场景），其次 Cookie
+        header_token = self.headers.get("X-CSUDB-Session", "").strip()
+        if header_token:
+            return header_token
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
         value = cookie.get("csudb_session")
         return "" if value is None else value.value
@@ -235,9 +239,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.UNAUTHORIZED, {"success": False, "error": {"message": "authentication failed"}})
                 return
             token = self.server.sessions.create(connection)
-            cookie = f"csudb_session={token}; Path=/; HttpOnly; SameSite=Strict"
+            cookie = f"csudb_session={token}; Path=/; HttpOnly; SameSite=Lax"
             self._send_json(HTTPStatus.OK, {
                 "success": True,
+                "session_token": token,
                 "attributes": connection.server_attributes,
                 "database": connection.database,
             }, cookie)
@@ -250,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/logout":
                 self.server.sessions.remove(token)
-                self._send_json(HTTPStatus.OK, {"success": True}, "csudb_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+                self._send_json(HTTPStatus.OK, {"success": True}, "csudb_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax")
             elif parsed.path == "/api/query":
                 sql = str(body.get("sql", "")).strip()
                 if not sql:
