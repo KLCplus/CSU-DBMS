@@ -11,6 +11,13 @@ See the Mulan PSL v2 for more details. */
 //
 // Created by Wenbin1002 on 2024/04/16
 //
+/**
+ * @file double_write_buffer.cpp
+ * @brief 双写缓冲的实现
+ * @ingroup BufferPool
+ * @details 共享表空间文件的布局为：文件头 + 定长的 DoubleWritePage 数组。
+ * 第 i 个缓冲页的偏移为 i * DoubleWritePage::SIZE + DoubleWriteBufferHeader::SIZE。
+ */
 #include <fcntl.h>
 
 #include "storage/os/buffer/double_write_buffer.h"
@@ -22,21 +29,31 @@ See the Mulan PSL v2 for more details. */
 
 using namespace common;
 
+/**
+ * @brief 双写缓冲中一个页面的内存表示
+ * @ingroup BufferPool
+ * @details 整体会按定长写入共享表空间文件，因此它的字节数决定了文件中的页间距。
+ */
 struct DoubleWritePage
 {
 public:
   DoubleWritePage() = default;
+
+  /** @brief 用页键、文件内页索引与页内容构造一个缓冲页 */
   DoubleWritePage(int32_t buffer_pool_id, PageNum page_num, int32_t page_index, Page &page);
 
 public:
-  DoubleWritePageKey key;
+  DoubleWritePageKey key;               ///< 页键，(分页文件 id, 页号)
   int32_t            page_index = -1; /// 页面在double write buffer文件中的页索引
   bool               valid = true; /// 表示页面是否有效，在页面被删除时，需要同时标记磁盘上的值。
-  Page               page;
+  Page               page;              ///< 页内容
 
-  static const int32_t SIZE;
+  static const int32_t SIZE;            ///< 缓冲页字节数，即 sizeof(DoubleWritePage)
 };
 
+/**
+ * @brief 构造一个缓冲页，把页内容整体拷贝进来
+ */
 DoubleWritePage::DoubleWritePage(int32_t buffer_pool_id, PageNum page_num, int32_t page_index, Page &_page)
   : key{buffer_pool_id, page_num}, page_index(page_index), page(_page)
 {}
@@ -45,17 +62,30 @@ const int32_t DoubleWritePage::SIZE = sizeof(DoubleWritePage);
 
 const int32_t DoubleWriteBufferHeader::SIZE = sizeof(DoubleWriteBufferHeader);
 
+/**
+ * @brief 构造双写缓冲
+ * @param bp_manager 关联的 BufferPoolManager，用于按 id 找回分页文件
+ * @param max_pages 内存中最多缓存多少个页
+ */
 DiskDoubleWriteBuffer::DiskDoubleWriteBuffer(BufferPoolManager &bp_manager, int max_pages /*=16*/) 
   : max_pages_(max_pages), bp_manager_(bp_manager)
 {
 }
 
+/**
+ * @brief 析构：把尚未写回的页刷到真实文件，然后关闭共享表空间文件
+ */
 DiskDoubleWriteBuffer::~DiskDoubleWriteBuffer()
 {
   flush_page();
   close(file_desc_);
 }
 
+/**
+ * @brief 打开共享表空间文件
+ * @details 已经打开过则报错返回；打开成功后调用 load_pages 把上次残留的页读进内存。
+ * @param filename 共享表空间文件路径
+ */
 RC DiskDoubleWriteBuffer::open_file(const char *filename)
 {
   if (file_desc_ >= 0) {
@@ -73,6 +103,13 @@ RC DiskDoubleWriteBuffer::open_file(const char *filename)
   return load_pages();
 }
 
+/**
+ * @brief 把缓冲区中的页全部写回各自的分页文件，并清空缓冲区
+ * @details 顺序很关键：先把共享表空间刷到磁盘，再逐页写真实文件；
+ * 每写成功一页就把它标为 invalid 并把这个标记持久化，最后删除内存对象。
+ * 这样即使在两步之间掉电，重放时该页仍被视为有效，重复写入同样的内容不会造成错误。
+ * 缓冲区装满或关闭数据库时走这条路径。
+ */
 RC DiskDoubleWriteBuffer::flush_page()
 {
   sync();
@@ -93,6 +130,14 @@ RC DiskDoubleWriteBuffer::flush_page()
   return RC::SUCCESS;
 }
 
+/**
+ * @brief 把一个页加入缓冲区，并立即写入共享表空间文件
+ * @details 命中已有缓冲页时只更新内容和文件，不改变页数统计；新增缓冲页时把页数写回文件头，
+ * 并在缓冲页数达到 max_pages_ 时触发一次整体刷盘。
+ * @param bp 页所属的分页文件
+ * @param page_num 页号
+ * @param page 待保护的页内容
+ */
 RC DiskDoubleWriteBuffer::add_page(DiskBufferPool *bp, PageNum page_num, Page &page)
 {
   scoped_lock lock_guard(lock_);
@@ -142,6 +187,11 @@ RC DiskDoubleWriteBuffer::add_page(DiskBufferPool *bp, PageNum page_num, Page &p
   return RC::SUCCESS;
 }
 
+/**
+ * @brief 把一个缓冲页写入共享表空间文件
+ * @details 位置由 page_index 决定，写入的是整个 DoubleWritePage 定长结构。
+ * @param page 待写入的缓冲页
+ */
 RC DiskDoubleWriteBuffer::write_page_internal(DoubleWritePage *page)
 {
   int32_t page_index = page->page_index;
@@ -159,6 +209,11 @@ RC DiskDoubleWriteBuffer::write_page_internal(DoubleWritePage *page)
   return RC::SUCCESS;
 }
 
+/**
+ * @brief 把一个缓冲页写回它所属的真实分页文件
+ * @details 标为 invalid 的页直接跳过：说明它已经写回过真实文件，再写一次会覆盖后来的更新。
+ * @param dblwr_page 待写回的缓冲页
+ */
 RC DiskDoubleWriteBuffer::write_page(DoubleWritePage *dblwr_page)
 {
   DiskBufferPool *disk_buffer = nullptr;
@@ -177,6 +232,12 @@ RC DiskDoubleWriteBuffer::write_page(DoubleWritePage *dblwr_page)
   return disk_buffer->write_page(dblwr_page->key.page_num, dblwr_page->page);
 }
 
+/**
+ * @brief 从内存缓冲区中取回一个页
+ * @details 只查内存映射，不读共享表空间文件。取回的内容比真实分页文件更新，
+ * 因为页刷盘时是先写这里、之后才成批写回真实文件。
+ * @return 缓冲区中没有该页时返回 BUFFERPOOL_INVALID_PAGE_NUM
+ */
 RC DiskDoubleWriteBuffer::read_page(DiskBufferPool *bp, PageNum page_num, Page &page)
 {
   scoped_lock lock_guard(lock_);
@@ -191,6 +252,12 @@ RC DiskDoubleWriteBuffer::read_page(DiskBufferPool *bp, PageNum page_num, Page &
   return RC::BUFFERPOOL_INVALID_PAGE_NUM;
 }
 
+/**
+ * @brief 移除某个分页文件的全部缓冲页，并把它们写回该文件
+ * @details 分页文件关闭或删除时调用。写回前按页号升序排序，避免小页号尚未写入就去 seek 更大的
+ * 偏移而失败。
+ * @param buffer_pool 目标分页文件
+ */
 RC DiskDoubleWriteBuffer::clear_pages(DiskBufferPool *buffer_pool)
 {
   vector<DoubleWritePage *> spec_pages;
@@ -233,6 +300,11 @@ RC DiskDoubleWriteBuffer::clear_pages(DiskBufferPool *buffer_pool)
   return RC::SUCCESS;
 }
 
+/**
+ * @brief 启动时把共享表空间文件中的页读回内存
+ * @details 先读文件头拿到页数，再逐页读取并对页数据做 CRC32 校验；只有校验通过的页
+ * 才进入内存映射，校验失败说明该页当初只写了一半，直接丢弃。
+ */
 RC DiskDoubleWriteBuffer::load_pages()
 {
   if (file_desc_ < 0) {
@@ -289,12 +361,19 @@ RC DiskDoubleWriteBuffer::load_pages()
   return RC::SUCCESS;
 }
 
+/**
+ * @brief 崩溃恢复：把共享表空间里残留的页写回真实分页文件
+ * @details 复用 flush_page，因为"把缓冲区里的页写回真实文件"正是恢复要做的事。
+ */
 RC DiskDoubleWriteBuffer::recover()
 {
   return flush_page();
 }
 
 ////////////////////////////////////////////////////////////////
+/**
+ * @brief 空实现：不做任何保护，页直接写入目标分页文件
+ */
 RC VacuousDoubleWriteBuffer::add_page(DiskBufferPool *bp, PageNum page_num, Page &page)
 {
   return bp->write_page(page_num, page);

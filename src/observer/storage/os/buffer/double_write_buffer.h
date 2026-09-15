@@ -1,4 +1,10 @@
-
+/**
+ * @file double_write_buffer.h
+ * @brief 页写入保护：双写缓冲
+ * @ingroup BufferPool
+ * @details 目标分页文件的一次写入不保证原子，可能只写了一半就掉电。双写缓冲在写真实页之前，
+ * 先把整页写入一个共享表空间文件并落盘；真实页写坏时可以从这里找回完整内容。
+ */
 #pragma once
 
 #include "common/lang/mutex.h"
@@ -11,6 +17,12 @@ class DiskBufferPool;
 struct DoubleWritePage;
 class BufferPoolManager;
 
+/**
+ * @brief 双写缓冲的抽象接口
+ * @ingroup BufferPool
+ * @details 只定义页级的写入保护语义，具体是落盘还是直写由实现决定。
+ * 上层 DiskBufferPool 只依赖这个接口，因此可以在不启用双写时替换成空实现。
+ */
 class DoubleWriteBuffer
 {
 public:
@@ -22,6 +34,13 @@ public:
    */
   virtual RC add_page(DiskBufferPool *bp, PageNum page_num, Page &page) = 0;
 
+  /**
+   * @brief 尝试从缓冲区中取回指定页
+   * @param bp 页所属的分页文件
+   * @param page_num 页号
+   * @param page 输出参数，取回时写入页内容
+   * @return 缓冲区中没有该页时返回 BUFFERPOOL_INVALID_PAGE_NUM
+   */
   virtual RC read_page(DiskBufferPool *bp, PageNum page_num, Page &page) = 0;
 
   /**
@@ -30,27 +49,43 @@ public:
   virtual RC clear_pages(DiskBufferPool *bp) = 0;
 };
 
+/**
+ * @brief 双写缓冲文件的文件头
+ * @ingroup BufferPool
+ * @details 位于共享表空间文件的最前面，记录当前文件中有效页面的个数。
+ */
 struct DoubleWriteBufferHeader
 {
-  int32_t page_cnt = 0;
+  int32_t page_cnt = 0;  ///< 文件中页面的个数
 
-  static const int32_t SIZE;
+  static const int32_t SIZE;  ///< 文件头字节数，即 sizeof(DoubleWriteBufferHeader)
 };
 
 // TODO change to FrameId
+/**
+ * @brief 双写缓冲中一个页面的键
+ * @ingroup BufferPool
+ * @details 与 FrameId 含义相同，用分页文件 id 加页号定位一个页。
+ */
 struct DoubleWritePageKey
 {
-  int32_t buffer_pool_id;
-  PageNum page_num;
+  int32_t buffer_pool_id;  ///< 页所属的分页文件 id
+  PageNum page_num;        ///< 页号
 
+  /** @brief 两个字段都相等才视为同一个键 */
   bool operator==(const DoubleWritePageKey &other) const
   {
     return buffer_pool_id == other.buffer_pool_id && page_num == other.page_num;
   }
 };
 
+/**
+ * @brief DoubleWritePageKey 的哈希函数
+ * @ingroup BufferPool
+ */
 struct DoubleWritePageKeyHash
 {
+  /** @brief 把两个字段的哈希值异或起来 */
   size_t operator()(const DoubleWritePageKey &key) const
   {
     return hash<int32_t>()(key.buffer_pool_id) ^ hash<PageNum>()(key.page_num);
@@ -97,6 +132,11 @@ public:
    */
   RC add_page(DiskBufferPool *bp, PageNum page_num, Page &page) override;
 
+  /**
+   * @brief 从内存缓冲区中取回指定页
+   * @details 只查内存中的 dblwr_pages_，不读共享表空间文件，因此仅在页面尚未通过 flush_page
+   * 写回真实文件之前有效。
+   */
   RC read_page(DiskBufferPool *bp, PageNum page_num, Page &page) override;
 
   /**
@@ -128,15 +168,21 @@ private:
   RC load_pages();
 
 private:
-  int                     file_desc_ = -1;
-  int                     max_pages_ = 0;
-  common::Mutex           lock_;
-  BufferPoolManager      &bp_manager_;
-  DoubleWriteBufferHeader header_;
+  int                     file_desc_ = -1;  ///< 共享表空间文件的描述符
+  int                     max_pages_ = 0;   ///< 内存中最多缓存多少个页，装满即刷
+  common::Mutex           lock_;            ///< 保护 dblwr_pages_
+  BufferPoolManager      &bp_manager_;      ///< 用于按 id 找回对应的分页文件
+  DoubleWriteBufferHeader header_;          ///< 共享表空间文件头
 
-  unordered_map<DoubleWritePageKey, DoubleWritePage *, DoubleWritePageKeyHash> dblwr_pages_;
+  unordered_map<DoubleWritePageKey, DoubleWritePage *, DoubleWritePageKeyHash> dblwr_pages_;  ///< 页号到缓冲页
 };
 
+/**
+ * @brief 不启用实际双写时的兼容实现
+ * @ingroup BufferPool
+ * @details 保持与真实实现完全相同的接口，写入直接落到目标分页文件，读取一律失败，
+ * 这样上层 DiskBufferPool 不需要为是否启用双写写分支。
+ */
 class VacuousDoubleWriteBuffer : public DoubleWriteBuffer
 {
 public:
@@ -147,6 +193,7 @@ public:
    */
   RC add_page(DiskBufferPool *bp, PageNum page_num, Page &page) override;
 
+  /** @brief 空实现：没有缓冲区，永远取不回页 */
   RC read_page(DiskBufferPool *bp, PageNum page_num, Page &page) override { return RC::BUFFERPOOL_INVALID_PAGE_NUM; }
 
   /**

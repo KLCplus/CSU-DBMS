@@ -24,6 +24,12 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "common/math/regex.h"
 
+/**
+ * @file io.cpp
+ * @brief 文件与目录工具实现
+ * @details 文件末尾的 writen/readn/preadn/pwriten 是页 I/O 的可靠传输原语，
+ * 共同点是都把「一次调用未必传完」这件事封装掉，用循环保证整块数据传完。
+ */
 namespace common {
 
 int readFromFile(const string &fileName, char *&outputData, size_t &fileSize)
@@ -350,6 +356,12 @@ int getFileSize(const char *filePath, int64_t &fileLen)
   return 0;
 }
 
+/**
+ * @brief 一次性写完指定长度的数据
+ * @details 循环调用 write 直到剩余长度减到 0。短写是正常现象，每轮都要推进缓冲区指针
+ * 与剩余长度；遇到 EINTR 与 EAGAIN 直接重试，其余错误返回 errno。
+ * @return 0 表示全部写完；其他值为 errno
+ */
 int writen(int fd, const void *buf, int size)
 {
   const char *tmp = (const char *)buf;
@@ -367,6 +379,12 @@ int writen(int fd, const void *buf, int size)
   return 0;
 }
 
+/**
+ * @brief 一次性读满指定长度的数据
+ * @details 循环调用 read 直到读满。读到 0 字节说明遇到文件尾，返回 -1 与普通错误区分开；
+ * EINTR 与 EAGAIN 重试。
+ * @return 0 表示读满；-1 表示提前遇到文件尾；其他值为 errno
+ */
 int readn(int fd, void *buf, int size)
 {
   char *tmp = (char *)buf;
@@ -387,6 +405,12 @@ int readn(int fd, void *buf, int size)
   return 0;
 }
 
+/**
+ * @brief 用 pread 可靠读满一页，不改变文件描述符的当前位置
+ * @details 每一轮都要显式推进 offset：pread 不会自己移动文件位置，
+ * 忘了推进就会在同一个位置反复读而陷入死循环。
+ * @return 0 表示读满；-1 表示提前遇到文件尾；其他值为 errno
+ */
 int preadn(int fd, void *buf, int size, int64_t offset)
 {
   char *tmp = static_cast<char *>(buf);
@@ -410,6 +434,12 @@ int preadn(int fd, void *buf, int size, int64_t offset)
   return 0;
 }
 
+/**
+ * @brief 用 pwrite 可靠写满一页，不改变文件描述符的当前位置
+ * @details 与 preadn 一样每轮显式推进 offset。写出 0 字节被当作 I/O 错误返回 EIO，
+ * 避免在写不下去的情况下空转。
+ * @return 0 表示写满；其他值为 errno
+ */
 int pwriten(int fd, const void *buf, int size, int64_t offset)
 {
   const char *tmp = static_cast<const char *>(buf);

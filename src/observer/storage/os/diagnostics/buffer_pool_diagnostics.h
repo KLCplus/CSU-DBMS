@@ -1,3 +1,10 @@
+/**
+ * @file buffer_pool_diagnostics.h
+ * @brief 只读诊断 DTO：Frame 快照、Buffer Pool 快照与批量刷盘结果
+ * @ingroup BufferPool
+ * @details 这些结构只携带值，不持有 Frame 或 Page 指针，也不暴露互斥量，
+ * 因此可以安全地跨线程、跨进程传给 CLI 与 Web。
+ */
 #pragma once
 
 #include <cstddef>
@@ -7,6 +14,12 @@
 #include "common/lang/vector.h"
 #include "storage/os/diagnostics/buffer_pool_stats.h"
 
+/**
+ * @brief 单个 Frame 的只读快照
+ * @ingroup BufferPool
+ * @details policy_metadata 由当前淘汰策略生成，LRU 给出队列位置，
+ * LRU-K 给出冷热分类，CLOCK 给出引用位与槽位。
+ */
 struct FrameSnapshot
 {
   string   frame_id;
@@ -19,6 +32,12 @@ struct FrameSnapshot
   string   policy_metadata;
 };
 
+/**
+ * @brief Buffer Pool 整体的只读快照
+ * @ingroup BufferPool
+ * @details 含容量、使用量、策略与后端名字，以及一份有限长度的 Frame 列表。
+ * buffer_pool_id 为 -1 表示这是汇总全部文件的全局快照。
+ */
 struct BufferPoolSnapshot
 {
   size_t capacity = 0;
@@ -34,6 +53,12 @@ struct BufferPoolSnapshot
   vector<FrameSnapshot> frames;
 };
 
+/**
+ * @brief 批量刷脏页的结果
+ * @ingroup BufferPool
+ * @details 分开统计跳过与失败，是为了让调用方区分「因为有业务在用所以没刷」
+ * 和「刷了但出错」这两种完全不同的情况。
+ */
 struct DirtyPageFlushResult
 {
   size_t flushed_count = 0;

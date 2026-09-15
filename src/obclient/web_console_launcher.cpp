@@ -1,3 +1,9 @@
+/**
+ * @file web_console_launcher.cpp
+ * @brief 从 CLI 启动与停止本地 Web 控制台进程
+ * @details 负责把 csudb-web 这个 Python 助手拉起来、记录 pid、探活与终止。
+ * 进程识别不只比对 pid，还要读 /proc 确认命令行，避免 pid 被复用后误杀无关进程。
+ */
 #include "web_console_launcher.h"
 
 #include <fcntl.h>
@@ -19,27 +25,35 @@ namespace {
 
 namespace fs = std::filesystem;
 
+/** @brief 返回用户主目录，取不到 HOME 时退回当前目录 */
 std::string home_directory()
 {
   const char *home = std::getenv("HOME");
   return home == nullptr ? "." : home;
 }
 
+/** @brief 返回状态目录，固定为 ~/.csudb */
 fs::path state_directory()
 {
   return fs::path(home_directory()) / ".csudb";
 }
 
+/** @brief 返回记录 Web 进程号的 pid 文件路径 */
 fs::path pid_path()
 {
   return state_directory() / "web.pid";
 }
 
+/** @brief 返回 Web 控制台的日志文件路径 */
 fs::path log_path()
 {
   return state_directory() / "web.log";
 }
 
+/**
+ * @brief 从 pid 文件读出进程号
+ * @details 读不到或读到不大于 1 的值都视为无效，避免把 init 进程当成目标。
+ */
 bool read_pid(pid_t &pid)
 {
   std::ifstream input(pid_path());
@@ -49,6 +63,11 @@ bool read_pid(pid_t &pid)
   return true;
 }
 
+/**
+ * @brief 判断给定 pid 是否真的是 CSUDB Web 进程
+ * @details 先确认进程存在，再读 /proc 下的命令行，只有包含 csudb-web 或
+ * csudb_web.py 才算命中。系统会复用 pid，只比对号码可能误伤无关进程。
+ */
 bool is_web_process(pid_t pid)
 {
   if (kill(pid, 0) != 0) return false;
@@ -59,6 +78,7 @@ bool is_web_process(pid_t pid)
   return value.find("csudb-web") != std::string::npos || value.find("csudb_web.py") != std::string::npos;
 }
 
+/** @brief 通过 /proc/self/exe 取得当前可执行文件的绝对路径 */
 fs::path executable_path()
 {
   std::vector<char> buffer(4096);
@@ -68,6 +88,11 @@ fs::path executable_path()
   return fs::path(buffer.data());
 }
 
+/**
+ * @brief 定位 Web 助手脚本
+ * @details 查找顺序是：环境变量显式指定、可执行文件同目录（开发构建）、
+ * 上级 libexec 目录（安装后布局）。三处都没有就返回空路径。
+ */
 fs::path find_web_script()
 {
   const char *override_path = std::getenv("CSUDB_WEB_SCRIPT");
@@ -85,12 +110,14 @@ fs::path find_web_script()
   return {};
 }
 
+/** @brief 删除残留的 pid 文件 */
 void remove_stale_pid_file()
 {
   std::error_code error;
   fs::remove(pid_path(), error);
 }
 
+/** @brief 确保状态目录存在并设为仅属主可访问，失败时写入错误说明 */
 bool ensure_state_directory(std::string &message)
 {
   std::error_code error;
@@ -103,6 +130,11 @@ bool ensure_state_directory(std::string &message)
   return true;
 }
 
+/**
+ * @brief 用系统默认浏览器打开地址
+ * @details fork 出子进程后把标准输出与错误重定向到 /dev/null，
+ * 再替换成 xdg-open，避免浏览器输出污染 CLI 的终端。
+ */
 void open_browser(const std::string &url)
 {
   const pid_t pid = fork();
@@ -119,6 +151,11 @@ void open_browser(const std::string &url)
 
 } // namespace
 
+/**
+ * @brief 查询 Web 控制台是否在运行
+ * @details 进程不存在或 pid 已对不上时顺手清掉残留的 pid 文件。
+ * @return 正在运行返回 true，并把 pid 与日志路径写进 message
+ */
 bool web_console_status(std::string &message)
 {
   pid_t pid = 0;
@@ -132,6 +169,15 @@ bool web_console_status(std::string &message)
   return true;
 }
 
+/**
+ * @brief 启动 Web 控制台
+ * @details 先校验端口与状态目录，已经在跑就直接返回地址。否则 fork 出子进程，
+ * 用 setsid 脱离终端，把标准输入接到 /dev/null、输出接到日志文件，
+ * 再替换成 python3 运行 Web 助手，并把数据库地址与监听端口作为参数传过去。
+ * 父进程轮询最多约一秒，确认 pid 文件出现且进程确实在跑才算启动成功。
+ * @param options 数据库地址、Web 端口与是否打开浏览器
+ * @param message 输出参数，成功时给出访问地址与日志路径
+ */
 bool start_web_console(const WebConsoleOptions &options, std::string &message)
 {
   if (options.web_port <= 0 || options.web_port > 65535) {
@@ -205,6 +251,11 @@ bool start_web_console(const WebConsoleOptions &options, std::string &message)
   return false;
 }
 
+/**
+ * @brief 停止 Web 控制台
+ * @details 先确认 pid 对应的确实是本项目的 Web 进程，再发 SIGTERM，
+ * 随后最多等约一秒确认退出，最后清掉 pid 文件。只终止经双重确认的进程。
+ */
 bool stop_web_console(std::string &message)
 {
   pid_t pid = 0;

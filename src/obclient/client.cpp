@@ -87,6 +87,7 @@ struct CliOverrides
   optional<string> url;
 };
 
+/** @brief 去掉字符串首尾的空白字符 */
 string trim(string value)
 {
   auto begin = std::find_if_not(value.begin(), value.end(), [](unsigned char c) { return std::isspace(c); });
@@ -94,18 +95,21 @@ string trim(string value)
   return begin < end ? string(begin, end) : string();
 }
 
+/** @brief 原地转成大写，用于把用户输入的关键字做不区分大小写的比较 */
 string upper(string value)
 {
   std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) { return std::toupper(c); });
   return value;
 }
 
+/** @brief 返回用户主目录，取不到 HOME 时退回当前目录 */
 string home_directory()
 {
   const char *home = getenv("HOME");
   return home == nullptr ? "." : home;
 }
 
+/** @brief 打印命令行帮助，覆盖连接、执行与输出三类选项 */
 void usage(const char *program)
 {
   cout << CSUDB_PRODUCT_NAME << " native client " << CSUDB_VERSION_STRING << "\n"
@@ -133,6 +137,7 @@ void usage(const char *program)
        << "      --version            Show version\n";
 }
 
+/** @brief 去掉配置文件里值两侧的成对单引号或双引号 */
 string unquote(string value)
 {
   value = trim(value);
@@ -143,6 +148,11 @@ string unquote(string value)
 
 using ConfigSections = map<string, map<string, string>>;
 
+/**
+ * @brief 读取极简 TOML 配置
+ * @details 只支持 [节名] 与 key = value 两种行，够用即可，不追求完整 TOML 语法。
+ * @return 节名到键值对的映射；文件不存在时返回空表
+ */
 ConfigSections load_toml(const string &path)
 {
   ConfigSections sections;
@@ -161,6 +171,7 @@ ConfigSections load_toml(const string &path)
   return sections;
 }
 
+/** @brief 把某个配置节里的 host、user、database、port 覆盖到选项上 */
 void apply_section(ClientOptions &options, const map<string, string> &section)
 {
   auto assign = [&](const char *key, string &target) { auto it = section.find(key); if (it != section.end()) target = it->second; };
@@ -171,6 +182,7 @@ void apply_section(ClientOptions &options, const map<string, string> &section)
   if (port != section.end()) options.port = std::atoi(port->second.c_str());
 }
 
+/** @brief 用 CSUDB_* 环境变量覆盖选项 */
 void apply_environment(ClientOptions &options)
 {
   auto assign = [](const char *name, string &target) { const char *value = getenv(name); if (value != nullptr && *value != '\0') target = value; };
@@ -182,6 +194,12 @@ void apply_environment(ClientOptions &options)
   if (port != nullptr && *port != '\0') options.port = std::atoi(port);
 }
 
+/**
+ * @brief 解析统一服务地址，支持 host、host:port 以及带协议前缀与路径的写法
+ * @details 先去协议前缀与路径，再单独处理 IPv6 字面量 [::1]:6789，
+ * 其余情况按最后一个冒号切分主机与端口。
+ * @return 通过修改 options 生效，不做失败返回
+ */
 // 解析统一服务地址：支持 host、host:port，可带 native:// / http(s):// 前缀与路径。
 // 例：127.0.0.1:6789（本地）、117.50.163.43:8157（线上）、http://host:port
 void apply_url(ClientOptions &options)
@@ -220,6 +238,13 @@ void apply_url(ClientOptions &options)
   }
 }
 
+/**
+ * @brief 解析命令行参数并与配置合并
+ * @details 优先级从低到高依次是：内置默认值、配置文件 default 节、指定 profile 节、
+ * 环境变量、命令行参数。所以配置文件先合并进来，命令行覆盖放在最后，
+ * 这样命令行永远拥有最高优先级。
+ * @return 参数非法或 profile 不存在时返回 false
+ */
 bool parse_options(int argc, char **argv, ClientOptions &options)
 {
   CliOverrides overrides;
@@ -287,6 +312,12 @@ bool parse_options(int argc, char **argv, ClientOptions &options)
   return true;
 }
 
+/**
+ * @brief 以不回显的方式读取密码
+ * @details 标准输入不是终端时改从 /dev/tty 读，避免密码混在管道重定向的内容里；
+ * 读取期间关闭终端回显，读完立即恢复。密码从不作为命令行参数接收。
+ * @return 读到的密码；没有可用终端时返回空串
+ */
 string read_password()
 {
   cerr << "Enter password: ";
@@ -317,6 +348,11 @@ string read_password()
   return password;
 }
 
+/**
+ * @brief Native 协议的客户端连接
+ * @details 只负责建立 TCP 连接与收发 JSON 包，不做任何 SQL 解析。
+ * 连接不可复制、可以移动，析构时自动关闭描述符。
+ */
 class NativeConnection
 {
 public:
@@ -332,6 +368,13 @@ public:
   ~NativeConnection() { close(); }
   void close() { if (fd_ >= 0) { ::close(fd_); fd_ = -1; } }
 
+/**
+ * @brief 建立到服务端的 TCP 连接
+ * @details 用 getaddrinfo 解析地址，逐个尝试返回的候选地址，第一个连上的就采用。
+ * @param host 主机名或 IP
+ * @param port 端口
+ * @param error 输出参数，失败时写入错误原因
+ */
   bool connect_to(const string &host, int port, string &error)
   {
     close();
@@ -352,6 +395,15 @@ public:
     return true;
   }
 
+/**
+ * @brief 发一次请求并读回响应
+ * @details 协议是「UTF-8 JSON 加一个 NUL 结尾」。发送侧循环处理短写；
+ * 接收侧循环累积直到遇到 NUL，并以 16 MiB 作为安全上限，防止异常服务端把客户端撑爆。
+ * 请求与响应都是 JSON，客户端与 CLI、Web、SDK 共用同一套语义。
+ * @param request 请求 JSON
+ * @param response 输出参数，响应 JSON
+ * @param error 输出参数，失败原因
+ */
   bool request(const Json::Value &request, Json::Value &response, string &error)
   {
     Json::StreamWriterBuilder builder;
@@ -385,6 +437,17 @@ private:
   int fd_ = -1;
 };
 
+/**
+ * @brief 把响应渲染成终端输出
+ * @details 三种形态：失败时打印错误码与消息；无结果集时打印影响行数与可选耗时；
+ * 有结果集时按 batch 开关选择制表符分隔或带边框的表格。
+ * 表格里值为 NULL 的单元格高亮显示，列宽按内容自适应。
+ * @param response 服务端响应
+ * @param out 输出流，可能是标准输出也可能是被重定向的文件
+ * @param batch 是否用制表符分隔的批处理格式
+ * @param timing 是否显示执行耗时
+ * @param style 终端配色
+ */
 void render_table(
     const Json::Value &response, std::ostream &out, bool batch, bool timing, const tui::Style &style)
 {
@@ -442,6 +505,13 @@ void render_table(
   }
 }
 
+/**
+ * @brief 判断一段输入是不是一条完整可执行的 SQL
+ * @details 逐字符跟踪单引号、双引号与反斜杠转义状态，只有出现在字符串之外的
+ * 分号且其后只剩空白，或者整段以反斜杠 g 结尾，才算输入结束。
+ * 这样才能支持跨行的字符串与多行语句。
+ * @return 可以执行返回 true，还需要继续输入返回 false
+ */
 bool complete_sql(const string &sql)
 {
   bool single = false, quoted = false, escape = false;
@@ -457,6 +527,10 @@ bool complete_sql(const string &sql)
   return !single && !quoted && stripped.size() >= 2 && stripped.substr(stripped.size() - 2) == "\\g";
 }
 
+/**
+ * @brief 把一段脚本按分号切成多条语句
+ * @details 与 complete_sql 用同一套引号与转义状态跟踪，所以字符串里的分号不会被误切。
+ */
 vector<string> split_sql_script(const string &script)
 {
   vector<string> statements;
@@ -474,12 +548,17 @@ vector<string> split_sql_script(const string &script)
   return statements;
 }
 
+/**
+ * @brief 判断语句是否包含敏感内容
+ * @details 命中 PASSWORD 或 IDENTIFIED BY 的语句不写进历史记录文件，避免口令落盘。
+ */
 bool sensitive_sql(const string &sql)
 {
   string normalized = upper(sql);
   return normalized.find("IDENTIFIED BY") != string::npos || normalized.find("PASSWORD") != string::npos;
 }
 
+/** @brief 打印 CLI 启动标志，按终端宽度选择完整标志、简版或纯文字 */
 void print_client_logo(const tui::Capabilities &terminal, const tui::Style &style)
 {
   if (terminal.layout() == tui::LayoutMode::MINIMAL || !terminal.unicode()) {
@@ -503,6 +582,11 @@ void print_client_logo(const tui::Capabilities &terminal, const tui::Style &styl
        << style.dim("Compiler · Database · Operating Systems") << "\n";
 }
 
+/**
+ * @brief 打印登录后的欢迎信息
+ * @details 先画标志，再列出服务端版本、主机、用户与当前数据库，
+ * 后面三行提示怎么输入语句、怎么补全、去哪看帮助。
+ */
 void banner(const ClientOptions &options, const Json::Value &login)
 {
   if (options.silent) return;
@@ -552,6 +636,7 @@ Type '/' and press Tab to list commands. Partial names are completed and
 mistyped commands show nearby candidates. Legacy backslash forms still work.
 )";
 
+/** @brief 返回全部元命令名字，供补全与拼写纠错使用 */
 const vector<string> &meta_command_names()
 {
   static const vector<string> names = {"/help", "/?", "/q", "/quit", "/exit", "/status", "/connect", "/use",
@@ -560,6 +645,11 @@ const vector<string> &meta_command_names()
   return names;
 }
 
+/**
+ * @brief 计算两个字符串的编辑距离
+ * @details 标准动态规划实现，只保留上一行与当前行两个数组。
+ * 用于把拼错的元命令映射到相近候选。
+ */
 size_t edit_distance(const string &left, const string &right)
 {
   vector<size_t> previous(right.size() + 1);
@@ -576,6 +666,7 @@ size_t edit_distance(const string &left, const string &right)
   return previous[right.size()];
 }
 
+/** @brief 判断 needle 是否为 candidate 的子序列，用于放宽拼错时的候选范围 */
 bool is_subsequence(const string &needle, const string &candidate)
 {
   size_t position = 0;
@@ -585,6 +676,7 @@ bool is_subsequence(const string &needle, const string &candidate)
   return position == needle.size();
 }
 
+/** @brief 统一元命令写法：转小写并把反斜杠前缀改成正斜杠，两种写法都接受 */
 string normalized_meta_command(string command)
 {
   std::transform(command.begin(), command.end(), command.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -592,6 +684,13 @@ string normalized_meta_command(string command)
   return command;
 }
 
+/**
+ * @brief 按输入给出元命令候选
+ * @details 先找前缀匹配；一个都没有时才做模糊匹配，条件是编辑距离不超过 2
+ * 或者是输入的子序列，最后按距离排序并最多返回 4 个。
+ * @param input 已经输入的部分命令
+ * @param include_fuzzy 是否允许模糊匹配。补全列表允许，行内提示只给前缀匹配
+ */
 vector<string> matching_meta_commands(const string &input, bool include_fuzzy)
 {
   const string query = normalized_meta_command(input);
@@ -616,6 +715,7 @@ vector<string> matching_meta_commands(const string &input, bool include_fuzzy)
   return result;
 }
 
+/** @brief 元命令的 Tab 补全回调 */
 replxx::Replxx::completions_t complete_meta_command(const string &input, int &context_length)
 {
   replxx::Replxx::completions_t completions;
@@ -625,6 +725,7 @@ replxx::Replxx::completions_t complete_meta_command(const string &input, int &co
   return completions;
 }
 
+/** @brief 元命令的行内提示回调，唯一候选时会高亮显示 */
 replxx::Replxx::hints_t hint_meta_command(
     const string &input, int &context_length, replxx::Replxx::Color &color)
 {
@@ -639,6 +740,12 @@ replxx::Replxx::hints_t hint_meta_command(
 replxx::Replxx::completions_t complete_dispatch(const string &input, int &context_length);
 replxx::Replxx::hints_t       hint_dispatch(const string &input, int &context_length, replxx::Replxx::Color &color);
 
+/**
+ * @brief 交互式外壳
+ * @details 承担全部分布在客户端一侧的工作：连接与登录、提示符、多行缓冲、
+ * 历史记录、补全与提示、元命令分发、结果渲染、输出重定向、Web 控制台启停。
+ * 它不解析也不执行 SQL，所有语句都原样发给服务端。
+ */
 class Shell
 {
 public:
@@ -647,6 +754,12 @@ public:
 
   explicit Shell(ClientOptions options) : options_(std::move(options)) {}
 
+/**
+ * @brief 外壳主流程
+ * @details 依次是：连服务端、处理 ping、取密码并登录、抹掉内存里的口令、
+ * 按选项选择一次性执行或进入交互。返回码区分连接失败、认证失败与语句失败，
+ * 便于脚本判断。
+ */
   int run()
   {
     string error;
@@ -684,17 +797,21 @@ public:
   }
 
 private:
+/** @brief 返回当前输出流，被 /output 重定向到文件时返回文件，否则是标准输出 */
   std::ostream &output() { return output_file_.is_open() ? output_file_ : cout; }
+/** @brief 结果配色：输出被重定向或处于批处理模式时关闭颜色 */
   tui::Style result_style() const
   {
     if (output_file_.is_open() || options_.batch) return tui::Style(false);
     return tui::Style(tui::Capabilities::detect(STDOUT_FILENO, !options_.no_color).color());
   }
+/** @brief 错误信息的配色 */
   tui::Style error_style() const
   {
     return tui::Style(tui::Capabilities::detect(STDERR_FILENO, !options_.no_color).color());
   }
 
+/** @brief 发一次请求，连接层失败时打印错误并返回 false */
   bool request(Json::Value &request, Json::Value &response)
   {
     string error;
@@ -702,6 +819,18 @@ private:
     return true;
   }
 
+/**
+ * @brief 向服务端请求 SQL 补全候选
+ * @details 把完整缓冲与光标位置一起发过去，由服务端做语法分析，客户端不自己猜。
+ * 可选返回模型生成的 ghost text。响应是一个八列的结果集，
+ * 依次是插入文本、显示文本、类型、来源、替换起止位置、分数与补充说明。
+ * @param buffer 当前完整输入缓冲，多行时含换行
+ * @param cursor 光标在缓冲中的位置
+ * @param want_model 是否请求模型生成的提示
+ * @param items 输出参数，补全候选
+ * @param ghost 输出参数，模型生成的提示文本
+ * @param model_used 输出参数，服务端是否真的用了模型
+ */
   // 从服务端获取 SQL 补全候选（确定性 + 可选模型 ghost text）
   bool fetch_completion(const string &buffer, size_t cursor, bool want_model, vector<CompletionEntry> &items, string &ghost, bool &model_used)
   {
@@ -733,6 +862,7 @@ private:
     return true;
   }
 
+/** @brief 打印某个前缀的补全候选，用于 --complete 与 /complete */
   bool print_completion(const string &sql)
   {
     vector<CompletionEntry> items;
@@ -752,6 +882,12 @@ private:
     return true;
   }
 
+/**
+ * @brief replxx 的补全回调
+ * @details 元命令走本地补全；SQL 则把累积缓冲与当前行拼起来交给服务端，
+ * 由服务端判断当前位置能不能补全。补全结果只取插入文本，
+ * 并把替换范围换算成 replxx 需要的上下文长度。
+ */
   // replxx 补全回调：SQL 语句补全（命令行/多行均可，使用 Shell 累积的 buffer）
   replxx::Replxx::completions_t complete_line(const string &input, int &context_length)
   {
@@ -778,6 +914,7 @@ private:
     return completions;
   }
 
+/** @brief replxx 的行内提示回调，只展示服务端返回的 ghost text */
   // replxx ghost text 回调（模型未启用时不会返回内容）
   replxx::Replxx::hints_t hint_line(const string &input, int &context_length, replxx::Replxx::Color &color)
   {
@@ -797,6 +934,11 @@ private:
     return hints;
   }
 
+/**
+ * @brief 执行一条 SQL 并渲染结果
+ * @details 先去掉结尾的反斜杠 g，再包成 query 请求发出去。
+ * 如果响应里带了当前数据库，就同步更新提示符上的库名，这样 USE 语句执行后提示符会自动跟着变。
+ */
   bool execute(string sql)
   {
     sql = trim(sql);
@@ -809,6 +951,7 @@ private:
     return response.get("success", false).asBool();
   }
 
+/** @brief 把一段脚本切成语句逐条执行，任一条失败则整体返回失败但继续执行后续语句 */
   bool execute_script(const string &script)
   {
     bool ok = true;
@@ -816,6 +959,7 @@ private:
     return ok;
   }
 
+/** @brief 读取 SQL 文件并逐条执行 */
   bool execute_file(const string &path)
   {
     std::ifstream in(path);
@@ -823,6 +967,14 @@ private:
     std::ostringstream content; content << in.rdbuf(); return execute_script(content.str());
   }
 
+/**
+ * @brief 显示服务端信息或 Buffer Pool 快照
+ * @details 两个命令共用一条路径，区别只在请求类型。先把 attributes 里的键值对
+ * 按固定列宽打印出来，快照请求再额外把 rows 当作表格渲染。
+ * 这正是 /status、/buffer 与 /pages 的实现。
+ * @param pages 为真时请求 buffer_snapshot，为假时请求 server_info
+ * @param limit 快照里最多返回多少个 Frame
+ */
   void show_status(bool pages, size_t limit)
   {
     Json::Value request_value, response;
@@ -842,6 +994,15 @@ private:
     if (pages) render_table(response, output(), options_.batch, false, style);
   }
 
+/**
+ * @brief 分发一条元命令
+ * @details 命令名先归一化再比较，因此 /status 与 \status 等价。
+ * 绝大多数命令在本地完成，只有 /use 会转成一条 USE 语句发给服务端。
+ * 无法识别时用编辑距离给出相近候选。
+ * @param line 整行输入
+ * @param quit 输出参数，收到退出命令时置为 true
+ * @return 恒为 true，表示这行输入已被消费
+ */
   bool dispatch_meta(const string &line, bool &quit)
   {
     std::istringstream stream(line);
@@ -926,6 +1087,13 @@ private:
     return true;
   }
 
+/**
+ * @brief 交互式主循环
+ * @details 每次循环先按终端能力重算提示符：一级提示符带库名，续行提示符缩进显示。
+ * 多行 SQL 累积在 sql_buffer_ 里，直到 complete_sql 判定输入完整才执行。
+ * 含密码的语句不进历史，Ctrl-C 清空缓冲但不退出。
+ * @return 进程退出码
+ */
   int interactive()
   {
     string config_dir = home_directory() + "/.csudb";
@@ -966,6 +1134,11 @@ private:
     return 0;
   }
 
+/**
+ * @brief 外壳持有的状态
+ * @details output_file_ 是 /output 的目标文件，session_history_ 是本会话历史，
+ * sql_buffer_ 是多行输入的累积缓冲。
+ */
   ClientOptions options_;
   NativeConnection connection_;
   std::ofstream output_file_;
@@ -973,12 +1146,14 @@ private:
   string         sql_buffer_;
 };
 
+/** @brief replxx 补全的统一入口，有活动外壳时转发给它，否则只补元命令 */
 replxx::Replxx::completions_t complete_dispatch(const string &input, int &context_length)
 {
   if (g_active_shell != nullptr) return g_active_shell->complete_line(input, context_length);
   return complete_meta_command(input, context_length);
 }
 
+/** @brief replxx 行内提示的统一入口 */
 replxx::Replxx::hints_t hint_dispatch(const string &input, int &context_length, replxx::Replxx::Color &color)
 {
   if (g_active_shell != nullptr) return g_active_shell->hint_line(input, context_length, color);
@@ -987,6 +1162,7 @@ replxx::Replxx::hints_t hint_dispatch(const string &input, int &context_length, 
 
 } // namespace
 
+/** @brief 程序入口：解析参数后交给 Shell 运行，参数非法时打印帮助并返回 64 */
 int main(int argc, char **argv)
 {
   ClientOptions options;

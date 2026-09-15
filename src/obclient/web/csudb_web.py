@@ -17,6 +17,9 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+# 复用仓库内的 Python SDK 作为唯一的 Native 协议客户端实现，
+# 这样 Web 不需要自己重写一遍协议编解码；安装后 SDK 不在源码树里时退回只加当前目录。
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 SOURCE_SDK = SCRIPT_DIR.parents[2] / "sdk" / "python" if len(SCRIPT_DIR.parents) > 2 else None
 if SOURCE_SDK and SOURCE_SDK.is_dir():
@@ -25,31 +28,40 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 import csudb  # noqa: E402
 
+# 请求体上限 1 MiB，避免超大请求占用内存
+# 标识符白名单：表名与库名会被拼进 SQL，必须先用这个正则校验，防止 SQL 注入
 MAX_BODY = 1024 * 1024
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
+# 会话表：把随机 token 映射到已登录的数据库连接
+# 浏览器只保存 token，密码只在登录那一次用掉，之后不落在任何地方
 class SessionStore:
     def __init__(self) -> None:
         self._sessions: dict[str, csudb.Connection] = {}
         self._lock = threading.Lock()
 
+    # 生成一个密码学安全的随机 token 并绑定连接。用 secrets 而不是 random，
+    # 因为前者来自操作系统的安全随机源，不可预测。
     def create(self, connection: csudb.Connection) -> str:
         token = secrets.token_urlsafe(32)
         with self._lock:
             self._sessions[token] = connection
         return token
 
+    # 按 token 取回连接，取不到返回 None
     def get(self, token: str) -> csudb.Connection | None:
         with self._lock:
             return self._sessions.get(token)
 
+    # 注销：移出会话表并关闭对应的数据库连接
     def remove(self, token: str) -> None:
         with self._lock:
             connection = self._sessions.pop(token, None)
         if connection:
             connection.close()
 
+    # 进程退出时关闭全部残留连接
     def close_all(self) -> None:
         with self._lock:
             connections = list(self._sessions.values())
@@ -58,9 +70,13 @@ class SessionStore:
             connection.close()
 
 
+# 支持并发的 HTTP 服务：每个请求一个线程，且随主进程一起退出
+
 class WebConsoleServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+
+    # 绑定监听地址，并记住要连接的数据库服务端地址
 
     def __init__(self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler], db_host: str, db_port: int):
         super().__init__(address, handler)
@@ -68,6 +84,8 @@ class WebConsoleServer(ThreadingHTTPServer):
         self.db_port = db_port
         self.sessions = SessionStore()
 
+
+# 只挑选可以对外暴露的字段，避免把服务端内部结构原样透传
 
 def public_result(response: dict) -> dict:
     return {
@@ -83,13 +101,20 @@ def public_result(response: dict) -> dict:
     }
 
 
+# HTTP 请求处理器：静态资源走 GET，数据接口按路径分发
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "CSUDB-Web/2026.1"
+
+    # 统一日志前缀，便于在 web.log 里筛选
 
     def log_message(self, message: str, *args: object) -> None:
         sys.stdout.write("[CSUDB_WEB] " + message % args + "\n")
         sys.stdout.flush()
 
+    # 安全响应头：禁止浏览器猜内容类型、禁止被其他站点嵌进 iframe、
+    # 不记录来源、限制资源加载范围、不缓存任何响应。
+    # CORS 允许外部来源加载的前端调用本接口，鉴权走自定义请求头而不是 Cookie。
     def _security_headers(self) -> None:
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
@@ -107,11 +132,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.send_header("Vary", "Origin")
 
+    # 预检请求直接返回 204
     def do_OPTIONS(self) -> None:
         self.send_response(HTTPStatus.NO_CONTENT)
         self._security_headers()
         self.end_headers()
 
+    # 发送 JSON 响应，可选同时下发会话 Cookie
     def _send_json(self, status: int, value: dict, cookie: str | None = None) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
@@ -123,6 +150,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # 发送静态文件
     def _send_file(self, path: Path, content_type: str) -> None:
         try:
             body = path.read_bytes()
@@ -136,6 +164,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    # 读取并解析 JSON 请求体，同时校验类型、长度与体积上限
     def _read_json(self) -> dict:
         content_type = self.headers.get("Content-Type", "")
         if not content_type.startswith("application/json"):
@@ -148,6 +177,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("JSON body must be an object")
         return value
 
+    # 取会话 token：自定义请求头优先，其次 Cookie。
+    # 两种方式是为了适配内嵌预览等 Cookie 受限的场景。
     def _session_token(self) -> str:
         # 自定义请求头优先（适配嵌入式预览/iframe 等 Cookie 受限场景），其次 Cookie
         header_token = self.headers.get("X-CSUDB-Session", "").strip()
@@ -160,11 +191,14 @@ class Handler(BaseHTTPRequestHandler):
     def _connection(self) -> csudb.Connection | None:
         return self.server.sessions.get(self._session_token())
 
+    # 要求已登录，未登录直接返回 401
     def _require_connection(self) -> csudb.Connection | None:
         connection = self._connection()
         if connection is None:
             self._send_json(HTTPStatus.UNAUTHORIZED, {"success": False, "error": {"message": "login required"}})
         return connection
+
+    # GET 接口：静态页面、健康检查，以及状态、页快照、库表清单、表数据与结构
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
@@ -228,6 +262,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(HTTPStatus.NOT_FOUND, {"success": False, "error": {"message": "unknown endpoint"}})
         except (csudb.Error, ValueError) as exc:
             self._send_json(HTTPStatus.BAD_REQUEST, {"success": False, "error": {"message": str(exc)}})
+
+    # POST 接口：登录、注销、执行 SQL、切换数据库、SQL 补全
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -299,6 +335,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.BAD_REQUEST, {"success": False, "error": {"message": str(exc)}})
 
 
+# 命令行参数：数据库地址、Web 监听地址与 pid 文件位置
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CSUDB 2026 local Web Console")
     parser.add_argument("--db-host", default="127.0.0.1")
@@ -308,6 +346,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--pid-file")
     return parser.parse_args()
 
+
+# 入口：强制只监听本地回环地址，写 pid 文件，注册优雅退出
 
 def main() -> int:
     args = parse_arguments()
@@ -324,6 +364,8 @@ def main() -> int:
         pid_file.parent.mkdir(parents=True, exist_ok=True)
         pid_file.write_text(str(os.getpid()), encoding="ascii")
         os.chmod(pid_file, 0o600)
+
+    # 收到终止信号时在另一个线程里关闭服务，避免阻塞信号处理函数
 
     def shutdown(signum: int, frame: object) -> None:
         threading.Thread(target=server.shutdown, daemon=True).start()

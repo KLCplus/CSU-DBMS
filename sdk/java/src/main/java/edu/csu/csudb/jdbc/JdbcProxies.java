@@ -26,9 +26,20 @@ import java.util.TreeMap;
 import java.util.concurrent.Executor;
 
 /** Small JDBC interface implementation using proxies to keep unsupported APIs explicit. */
+/**
+ * 用动态代理把 Native 协议包装成 JDBC 接口。
+ *
+ * <p>JDBC 的 Connection、Statement、ResultSet 等接口方法非常多，逐一手写实现
+ * 会产生大量样板代码。这里改用 java.lang.reflect.Proxy：每个接口只需要一个
+ * InvocationHandler，集中处理「哪些方法我们支持、哪些要抛
+ * SQLFeatureNotSupportedException」，把不支持的方法显式暴露出来而不是静默失败。
+ *
+ * <p>参数绑定仍在客户端完成字面量转义，不是服务端 PreparedStatement。
+ */
 final class JdbcProxies {
   private JdbcProxies() {}
 
+  /** 建立 JDBC Connection 代理 */
   static Connection connection(NativeClient client, String url, String user, String database) {
     ConnectionHandler handler = new ConnectionHandler(client, url, user, database);
     Connection connection = proxy(Connection.class, handler);
@@ -37,10 +48,12 @@ final class JdbcProxies {
   }
 
   @SuppressWarnings("unchecked")
+  /** 统一创建动态代理并附带可读描述，便于在异常信息里指明是哪个对象 */
   private static <T> T proxy(Class<T> type, InvocationHandler handler) {
     return (T) Proxy.newProxyInstance(type.getClassLoader(), new Class<?>[] {type}, handler);
   }
 
+  /** 处理 equals、hashCode、toString 三个 Object 方法，其余返回 null 表示未处理 */
   private static Object objectMethod(Object proxy, Method method, Object[] args, String description) {
     return switch (method.getName()) {
       case "toString" -> description;
@@ -50,10 +63,12 @@ final class JdbcProxies {
     };
   }
 
+  /** 判断是否为 Object 自身声明的方法 */
   private static boolean isObjectMethod(Method method) {
     return method.getDeclaringClass() == Object.class;
   }
 
+  /** 执行目标方法，把反射异常翻译成 SQLException */
   private static Object wrapper(Object proxy, Method method, Object[] args) throws SQLException {
     if (method.getName().equals("isWrapperFor")) return ((Class<?>) args[0]).isInstance(proxy);
     if (method.getName().equals("unwrap")) {
@@ -64,10 +79,12 @@ final class JdbcProxies {
     return null;
   }
 
+  /** 构造「该能力尚未支持」异常，附带方法名便于定位 */
   private static SQLFeatureNotSupportedException unsupported(Method method) {
     return new SQLFeatureNotSupportedException("CSUDB JDBC does not yet support " + method.getName(), "0A000");
   }
 
+  /** 处理 Connection 接口上的全部方法 */
   private static final class ConnectionHandler implements InvocationHandler {
     private final NativeClient client;
     private final String url;
@@ -141,6 +158,7 @@ final class JdbcProxies {
     }
   }
 
+  /** 创建一个未预编译的语句代理 */
   private static Statement statement(ConnectionHandler connection, String preparedSql) {
     StatementHandler handler = new StatementHandler(connection, preparedSql);
     Class<?> type = preparedSql == null ? Statement.class : PreparedStatement.class;
@@ -149,6 +167,7 @@ final class JdbcProxies {
     return handler.proxy;
   }
 
+  /** 处理 Statement 与 PreparedStatement 上的全部方法 */
   private static final class StatementHandler implements InvocationHandler {
     private final ConnectionHandler connection;
     private final String preparedSql;
@@ -254,14 +273,17 @@ final class JdbcProxies {
     }
   }
 
+  /** 用服务端返回的列与行构造一个完整的 ResultSet */
   private static ResultSet resultSet(List<Map<String, Object>> columns, List<List<Object>> rows, Statement statement) {
     return proxy(ResultSet.class, new ResultSetHandler(columns, rows, statement));
   }
 
+  /** 构造不含任何行的空结果集，用于无结果集的语句 */
   private static ResultSet emptyResultSet(Statement statement) {
     return resultSet(List.of(), List.of(), statement);
   }
 
+  /** 处理 ResultSet 接口上的全部方法，行数据在创建时就已物化 */
   private static final class ResultSetHandler implements InvocationHandler {
     private final List<Map<String, Object>> columns;
     private final List<List<Object>> rows;
@@ -344,6 +366,7 @@ final class JdbcProxies {
     }
   }
 
+  /** 由列元数据构造 ResultSetMetaData 代理 */
   private static ResultSetMetaData resultSetMetaData(List<Map<String, Object>> columns) {
     return proxy(ResultSetMetaData.class, (object, method, args) -> {
       if (isObjectMethod(method)) return objectMethod(object, method, args, "CSUDB ResultSetMetaData");
@@ -370,6 +393,7 @@ final class JdbcProxies {
     });
   }
 
+  /** 由连接信息构造 DatabaseMetaData 代理 */
   private static DatabaseMetaData databaseMetaData(ConnectionHandler connection) {
     return proxy(DatabaseMetaData.class, (object, method, args) -> {
       if (isObjectMethod(method)) return objectMethod(object, method, args, "CSUDB DatabaseMetaData");
@@ -395,22 +419,26 @@ final class JdbcProxies {
   }
 
   @SuppressWarnings("unchecked")
+  /** 从响应中取出列定义列表 */
   private static List<Map<String, Object>> columns(Map<String, Object> response) {
     Object value = response.get("columns");
     return value instanceof List<?> list ? (List<Map<String, Object>>) (List<?>) list : List.of();
   }
 
   @SuppressWarnings("unchecked")
+  /** 从响应中取出数据行 */
   private static List<List<Object>> rows(Map<String, Object> response) {
     Object value = response.get("rows");
     return value instanceof List<?> list ? new ArrayList<>((List<List<Object>>) (List<?>) list) : new ArrayList<>();
   }
 
+  /** 按 JDBC 的从 1 开始的列序号取列定义，越界时报错 */
   private static Map<String, Object> column(List<Map<String, Object>> columns, int jdbcIndex) throws SQLException {
     if (jdbcIndex <= 0 || jdbcIndex > columns.size()) throw new SQLException("invalid column index " + jdbcIndex, "07009");
     return columns.get(jdbcIndex - 1);
   }
 
+  /** 把服务端的类型名映射成 java.sql.Types 里的整型常量 */
   private static int sqlType(String type) {
     String normalized = type.toUpperCase(Locale.ROOT);
     if (normalized.contains("INT")) return Types.INTEGER;
@@ -420,6 +448,12 @@ final class JdbcProxies {
     return Types.VARCHAR;
   }
 
+  /**
+   * 把预处理语句里的问号占位符替换成转义后的字面量。
+   *
+   * <p>按顺序扫描，遇到字符串字面量就整段跳过，避免把字符串里的问号误当占位符；
+   * 问号个数与参数个数不一致时报错。
+   */
   private static String bind(String sql, Map<Integer, Object> parameters) throws SQLException {
     StringBuilder output = new StringBuilder();
     boolean single = false;
@@ -440,6 +474,7 @@ final class JdbcProxies {
     return output.toString();
   }
 
+  /** 判断某个方法名是否是设置参数的方法 */
   private static boolean isParameterSetter(String method) {
     return switch (method) {
       case "setNull", "setBoolean", "setByte", "setShort", "setInt", "setLong",
@@ -449,6 +484,7 @@ final class JdbcProxies {
     };
   }
 
+  /** 把 Java 值转成 SQL 字面量 */
   private static String literal(Object value) {
     if (value == null) return "NULL";
     if (value instanceof Boolean bool) return bool ? "1" : "0";
@@ -458,14 +494,20 @@ final class JdbcProxies {
     return quote(String.valueOf(value));
   }
 
+  /** 给字符串加引号并把内部单引号加倍 */
   private static String quote(String value) {
     return "'" + value.replace("'", "''") + "'";
   }
 
+  /** 取字符串值，null 保持为 null */
   private static String stringValue(Object value) { return value == null ? null : String.valueOf(value); }
+  /** 取整数值，null 视为 0 */
   private static int integerValue(Object value) { return value == null ? 0 : Integer.parseInt(String.valueOf(value)); }
+  /** 取长整数值，null 视为 0 */
   private static long longValue(Object value) { return value == null ? 0L : Long.parseLong(String.valueOf(value)); }
+  /** 取浮点值，null 视为 0 */
   private static double doubleValue(Object value) { return value == null ? 0.0 : Double.parseDouble(String.valueOf(value)); }
+  /** 取布尔值，容忍字符串形式的真值 */
   private static boolean booleanValue(Object value) {
     if (value == null) return false;
     String text = String.valueOf(value);

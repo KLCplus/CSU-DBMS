@@ -12,6 +12,12 @@ See the Mulan PSL v2 for more details. */
 // Created by Longda on 2010
 //
 
+/**
+ * @file io.h
+ * @brief 文件读写工具，其中 readn/writen/preadn/pwriten 是页 I/O 依赖的可靠传输原语
+ * @details 返回约定不统一，调用时要留意：writen 与 pwriten 返回 0 表示成功、
+ * 其他值表示 errno；readn 与 preadn 额外用 -1 表示提前遇到文件尾。
+ */
 #pragma once
 
 #include <vector>

@@ -1,4 +1,11 @@
 
+/**
+ * @file buffer_pool_log.h
+ * @brief 页分配与释放的日志记录与重放
+ * @ingroup CLog
+ * @details 这里的 log 指的是参与崩溃恢复的预写日志，不是调试输出。
+ * 页的分配与释放必须留下日志，重启后重放才能还原文件头的分配位图。
+ */
 #pragma once
 
 #include "common/lang/string.h"
@@ -25,13 +32,16 @@ public:
   };
 
 public:
+/** @brief 用枚举构造 */
   BufferPoolOperation(Type type) : type_(type) {}
+/** @brief 用日志中保存的整数构造，用于重放 */
   explicit BufferPoolOperation(int32_t type) : type_(static_cast<Type>(type)) {}
   ~BufferPoolOperation() = default;
 
   Type    type() const { return type_; }
   int32_t type_id() const { return static_cast<int32_t>(type_); }
 
+/** @brief 转成形如 1:ALLOCATE 的调试字符串 */
   string to_string() const
   {
     string ret = std::to_string(type_id()) + ":";

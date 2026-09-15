@@ -1,4 +1,11 @@
-
+/**
+ * @file disk_buffer_pool.h
+ * @brief 分页文件缓存的主体：文件头、Frame 管理器、分页文件、BufferPool 管理器
+ * @ingroup BufferPool
+ * @details 本文件是整个 OS 存储层的目录。BPFrameManager 提供所有分页文件共享的内
+ * 存 Frame 池，DiskBufferPool 管理其中一个分页文件，BufferPoolManager 管理多个
+ * DiskBufferPool 并持有唯一的 FrameManager。
+ */
 #pragma once
 
 #include <fcntl.h>
@@ -40,6 +47,7 @@ class BufferPoolLogHandler;
  * @defgroup BufferPool
  */
 
+/// 文件头中位于 BPFileHeader 之后的子头长度，历史遗留宏
 #define BP_FILE_SUB_HDR_SIZE (sizeof(BPFileSubHeader))
 
 /**
@@ -66,6 +74,7 @@ struct BPFileHeader
   static const int MAX_PAGE_NUM =
       (BP_PAGE_DATA_SIZE - sizeof(buffer_pool_id) - sizeof(page_count) - sizeof(allocated_pages)) * 8;
 
+  /** @brief 转为包含 id、页数与已分配页数的调试字符串 */
   string to_string() const;
 };
 
@@ -80,9 +89,21 @@ struct BPFileHeader
 class BPFrameManager
 {
 public:
+  /**
+   * @brief 构造 Frame 管理器
+   * @param tag 用于日志与内存池的标识
+   * @param replacement_policy 淘汰策略类型，默认 LRU
+   */
   BPFrameManager(const char *tag, BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU);
 
+  /**
+   * @brief 初始化内存池与 Frame 缓存
+   * @param pool_num 分页文件个数上限
+   * @param item_num_per_pool 每个分页文件预留的 Frame 数
+   */
   RC init(int pool_num, int item_num_per_pool = DEFAULT_ITEM_NUM_PER_POOL);
+
+  /** @brief 释放缓存中全部 Frame 并回收内存池 */
   RC cleanup();
 
   /**
@@ -126,6 +147,7 @@ public:
    */
   int purge_frames(int count, function<RC(Frame *frame)> purger);
 
+  /** @brief 返回当前缓存中实际驻留的 Frame 个数 */
   size_t frame_num() const { return frames_.count(); }
 
   /**
@@ -133,34 +155,51 @@ public:
    */
   size_t total_frame_num() const { return allocator_.get_size(); }
 
+  /**
+   * @brief 导出只读诊断快照
+   * @param buffer_pool_id 指定分页文件 id；传 -1 表示汇总全部文件
+   * @return 不暴露任何内部指针的 BufferPoolSnapshot
+   */
   BufferPoolSnapshot snapshot(int buffer_pool_id = -1) const;
 
+  /** @brief 返回当前使用的淘汰策略类型 */
   BufferPoolReplacementPolicy replacement_policy_type() const { return replacement_policy_type_; }
+
+  /** @brief 返回淘汰策略对象，供诊断读取其元数据 */
   const ReplacementPolicy &replacement_policy() const { return *replacement_policy_; }
+
+  /** @brief 返回全局统计对象 */
   BufferPoolStats            &stats() { return stats_; }
+
+  /** @brief 返回只读的全局统计对象 */
   const BufferPoolStats      &stats() const { return stats_; }
 
 private:
+  /** @brief 在锁内按 FrameId 查找 Frame，get 的公共实现 */
   Frame *get_internal(const FrameId &frame_id);
+
+  /** @brief 在锁内回收 Frame，free 的公共实现 */
   RC     free_internal(const FrameId &frame_id, Frame *frame);
 
 private:
+  /** @brief FrameId 的哈希函数适配器，供 LruCache 使用 */
   class BPFrameIdHasher
   {
   public:
+    /** @brief 转发给 FrameId::hash */
     size_t operator()(const FrameId &frame_id) const { return frame_id.hash(); }
   };
 
   using FrameLruCache  = common::LruCache<FrameId, Frame *, BPFrameIdHasher>;
   using FrameAllocator = common::MemPoolSimple<Frame>;
 
-  mutex          lock_;
-  FrameLruCache  frames_;
-  FrameAllocator allocator_;
-  BufferPoolReplacementPolicy replacement_policy_type_;
-  unique_ptr<ReplacementPolicy> replacement_policy_;
-  BufferPoolStats              stats_;
-  size_t                       capacity_ = 0;
+  mutex          lock_;                     ///< 保护 frames_ 与 allocator_ 的管理锁
+  FrameLruCache  frames_;                   ///< FrameId 到 Frame 的映射，附带 LRU 能力
+  FrameAllocator allocator_;                ///< Frame 对象的内存池
+  BufferPoolReplacementPolicy replacement_policy_type_;      ///< 当前策略类型
+  unique_ptr<ReplacementPolicy> replacement_policy_;         ///< 策略实例
+  BufferPoolStats              stats_;                       ///< 全局统计
+  size_t                       capacity_ = 0;                ///< 可驻留的 Frame 数上限
 };
 
 /**
@@ -173,14 +212,25 @@ public:
   BufferPoolIterator();
   ~BufferPoolIterator();
 
+  /**
+   * @brief 用分页文件的分配 bitmap 初始化迭代器
+   * @param bp 目标分页文件
+   * @param start_page 起始页号
+   */
   RC      init(DiskBufferPool &bp, PageNum start_page = 0);
+
+  /** @brief 判断是否还有下一个已分配的页 */
   bool    has_next();
+
+  /** @brief 返回下一个已分配的页号 */
   PageNum next();
+
+  /** @brief 重置到起始位置 */
   RC      reset();
 
 private:
-  common::Bitmap bitmap_;
-  PageNum        current_page_num_ = -1;
+  common::Bitmap bitmap_;                 ///< 分页文件分配位图的副本
+  PageNum        current_page_num_ = -1;  ///< 当前迭代到的页号
 };
 
 /**
@@ -192,6 +242,14 @@ private:
 class DiskBufferPool final
 {
 public:
+  /**
+   * @brief 构造一个分页文件对象
+   * @param bp_manager 所属的 BufferPoolManager
+   * @param frame_manager 共享的 Frame 管理器
+   * @param dblwr_manager 双写缓冲管理器
+   * @param log_handler 日志处理器，用于页分配与释放的日志
+   * @param io_backend_type I/O 后端类型，legacy 或 positional
+   */
   DiskBufferPool(BufferPoolManager &bp_manager, BPFrameManager &frame_manager, DoubleWriteBuffer &dblwr_manager,
       LogHandler &log_handler, PageIOBackendType io_backend_type);
   ~DiskBufferPool();
@@ -230,6 +288,11 @@ public:
    * 如果已经脏， 则刷到磁盘，除了pinned page
    */
   RC purge_page(PageNum page_num);
+
+  /**
+   * @brief 关闭文件时刷回并释放全部页
+   * @param reason 刷盘原因，默认 SHUTDOWN
+   */
   RC purge_all_pages(FlushReason reason = FlushReason::SHUTDOWN);
 
   /**
@@ -247,6 +310,7 @@ public:
    */
   RC check_all_pages_unpinned();
 
+  /** @brief 返回底层文件的文件描述符 */
   int file_desc() const;
 
   /**
@@ -263,8 +327,13 @@ public:
   RC flush_dirty_pages(size_t max_pages, DirtyPageFlushResult &result,
       FlushReason reason = FlushReason::EXPLICIT);
 
+  /** @brief 导出本分页文件的只读诊断快照 */
   BufferPoolSnapshot snapshot() const;
+
+  /** @brief 导出本分页文件的统计快照 */
   BufferPoolStatsSnapshot stats() const { return stats_.snapshot(); }
+
+  /** @brief 返回本分页文件使用的 I/O 后端类型 */
   PageIOBackendType io_backend_type() const { return io_backend_->type(); }
 
   /**
@@ -277,21 +346,35 @@ public:
    */
   RC write_page(PageNum page_num, Page &page);
 
+  /** @brief 恢复阶段重做一次页分配，按 LSN 更新文件头 bitmap */
   RC redo_allocate_page(LSN lsn, PageNum page_num);
+
+  /** @brief 恢复阶段重做一次页释放，按 LSN 更新文件头 bitmap */
   RC redo_deallocate_page(LSN lsn, PageNum page_num);
 
 public:
+  /** @brief 返回分页文件 id */
   int32_t id() const { return buffer_pool_id_; }
 
+  /** @brief 返回分页文件名 */
   const char *filename() const { return file_name_.c_str(); }
 
 protected:
+  /**
+   * @brief 为指定页号申请一个已 pin 的 Frame
+   * @details 先找空闲 Frame，不够时调用替换策略选 victim；victim 为脏则先刷盘再回收。
+   * 全部 Frame 都被 pin 时返回 BUFFERPOOL_NOBUF 并记录 NO_BUFFER 诊断。
+   * @param page_num 页号
+   * @param buf 输出参数，返回申请到的 Frame
+   */
   RC allocate_frame(PageNum page_num, Frame **buf);
 
   /**
    * 刷新指定页面到磁盘(flush)，并且释放关联的Frame
    */
   RC purge_frame(PageNum page_num, Frame *used_frame, FlushReason reason = FlushReason::EXPLICIT);
+
+  /** @brief 校验页号是否落在本文件的有效范围内 */
   RC check_page_num(PageNum page_num);
 
   /**
@@ -303,6 +386,12 @@ protected:
    * 如果页面是脏的，就将数据刷新到磁盘
    */
   RC flush_page_internal(Frame &frame, FlushReason reason);
+
+  /**
+   * @brief 打印当前仍被 pin 的 Frame 清单，用于 pin starvation 诊断
+   * @param context 日志前缀，说明触发场景
+   * @param warning 为 true 时以 WARN 级别输出
+   */
   void log_pinned_frames(const char *context, bool warning) const;
 
 private:
@@ -310,7 +399,7 @@ private:
   BPFrameManager      &frame_manager_;  /// Frame 管理器
   DoubleWriteBuffer   &dblwr_manager_;  /// Double Write Buffer 管理器
   BufferPoolLogHandler log_handler_;    /// BufferPool 日志处理器
-  unique_ptr<PageIOBackend> io_backend_;
+  unique_ptr<PageIOBackend> io_backend_;  /// 目标分页文件的 I/O 后端
   BufferPoolStats stats_;                /// 当前分页文件的统计；全局统计仍由 FrameManager 持有
 
   int file_desc_ = -1;  /// 文件描述符
@@ -322,8 +411,8 @@ private:
 
   string file_name_;  /// 文件名
 
-  common::Mutex lock_;
-  common::Mutex wr_lock_;
+  common::Mutex lock_;     /// 保护文件头与分配状态的锁
+  common::Mutex wr_lock_;  /// 串行化目标分页文件的读写，保证 I/O 顺序
 
 private:
   friend class BufferPoolIterator;
@@ -336,25 +425,54 @@ private:
 class BufferPoolManager final
 {
 public:
+  /**
+   * @brief 构造 BufferPool 管理器
+   * @param memory_size 缓存可用内存字节数，0 表示使用默认容量
+   * @param replacement_policy 淘汰策略类型
+   * @param io_backend_type I/O 后端类型
+   */
   BufferPoolManager(int memory_size = 0,
       BufferPoolReplacementPolicy replacement_policy = BufferPoolReplacementPolicy::LRU,
       PageIOBackendType io_backend_type = PageIOBackendType::LEGACY);
   ~BufferPoolManager();
 
+  /**
+   * @brief 注入双写缓冲实现并初始化 Frame 管理器
+   * @param dblwr_buffer 双写缓冲对象
+   */
   RC init(unique_ptr<DoubleWriteBuffer> dblwr_buffer);
 
+  /** @brief 新建一个分页文件并写入初始文件头 */
   RC create_file(const char *file_name);
+
+  /** @brief 打开一个已存在的分页文件 */
   RC open_file(LogHandler &log_handler, const char *file_name, DiskBufferPool *&bp);
+
+  /** @brief 关闭一个分页文件并释放其对象 */
   RC close_file(const char *file_name);
 
+  /** @brief 刷新单个 Frame 对应的页 */
   RC flush_page(Frame &frame, FlushReason reason = FlushReason::EXPLICIT);
 
+  /** @brief 返回全局唯一的 Frame 管理器 */
   BPFrameManager    &get_frame_manager() { return frame_manager_; }
+
+  /** @brief 返回双写缓冲实现 */
   DoubleWriteBuffer *get_dblwr_buffer() { return dblwr_buffer_.get(); }
+
+  /** @brief 返回全局统计快照 */
   BufferPoolStatsSnapshot stats() const { return frame_manager_.stats().snapshot(); }
+
+  /** @brief 清零全局统计 */
   void reset_stats() { frame_manager_.stats().reset(); }
+
+  /** @brief 返回当前淘汰策略类型 */
   BufferPoolReplacementPolicy replacement_policy() const { return frame_manager_.replacement_policy_type(); }
+
+  /** @brief 返回 I/O 后端类型 */
   PageIOBackendType io_backend_type() const { return io_backend_type_; }
+
+  /** @brief 导出全局只读诊断快照 */
   BufferPoolSnapshot snapshot() const;
 
   /**
@@ -366,13 +484,13 @@ public:
   RC get_buffer_pool(int32_t id, DiskBufferPool *&bp);
 
 private:
-  BPFrameManager frame_manager_;
+  BPFrameManager frame_manager_;  ///< 所有分页文件共享的 Frame 管理器
 
-  unique_ptr<DoubleWriteBuffer> dblwr_buffer_;
+  unique_ptr<DoubleWriteBuffer> dblwr_buffer_;  ///< 双写缓冲实现
 
-  common::Mutex                            lock_;
-  unordered_map<string, DiskBufferPool *>  buffer_pools_;
-  unordered_map<int32_t, DiskBufferPool *> id_to_buffer_pools_;
+  common::Mutex                            lock_;                 ///< 保护下面两张表
+  unordered_map<string, DiskBufferPool *>  buffer_pools_;         ///< 文件名到分页文件对象
+  unordered_map<int32_t, DiskBufferPool *> id_to_buffer_pools_;   ///< id 到分页文件对象
   atomic<int32_t>                          next_buffer_pool_id_{1};  // 系统启动时，会打开所有的表，这样就可以知道当前系统最大的ID是多少了
-  PageIOBackendType                        io_backend_type_ = PageIOBackendType::LEGACY;
+  PageIOBackendType                        io_backend_type_ = PageIOBackendType::LEGACY;  ///< I/O 后端类型
 };

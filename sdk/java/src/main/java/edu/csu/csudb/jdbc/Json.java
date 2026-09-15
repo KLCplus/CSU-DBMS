@@ -7,15 +7,27 @@ import java.util.List;
 import java.util.Map;
 
 /** Minimal JSON codec for CSUDB's dependency-free Native protocol. */
+/**
+ * 极简 JSON 编解码，只覆盖本项目协议用到的类型。
+ *
+ * <p>刻意不引入第三方依赖，让 JDBC 驱动可以只靠 JDK 运行。
+ * 支持对象、数组、字符串、数字、布尔与 null，不支持注释与尾随逗号。
+ */
 final class Json {
   private Json() {}
 
+  /** 把 Map、List 与基本类型序列化成 JSON 文本 */
   static String stringify(Object value) {
     StringBuilder output = new StringBuilder();
     write(value, output);
     return output.toString();
   }
 
+  /**
+   * 把 JSON 文本解析成 Map。
+   *
+   * @throws SQLException 文本格式非法，或顶层不是对象
+   */
   static Map<String, Object> parseObject(String text) throws SQLException {
     Object value = new Parser(text).parse();
     if (!(value instanceof Map<?, ?> map)) {
@@ -26,6 +38,7 @@ final class Json {
     return result;
   }
 
+  /** 递归写出一个值 */
   private static void write(Object value, StringBuilder output) {
     if (value == null) {
       output.append("null");
@@ -75,6 +88,7 @@ final class Json {
     }
   }
 
+  /** 递归下降解析器：按当前字符决定进入哪种结构 */
   private static final class Parser {
     private final String text;
     private int position;
