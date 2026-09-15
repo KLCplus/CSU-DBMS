@@ -9,6 +9,7 @@
 enum class BufferPoolReplacementPolicy
 {
   LRU,
+  LRU_K,
   FIFO,
   CLOCK,
 };

@@ -378,6 +378,9 @@ RC DiskBufferPool::get_this_page(PageNum page_num, Frame **frame)
 {
   RC rc  = RC::SUCCESS;
   *frame = nullptr;
+  if ((rc = check_page_num(page_num)) != RC::SUCCESS) {
+    return rc;
+  }
 
   Frame *used_match_frame = frame_manager_.get(id(), page_num);
   if (used_match_frame != nullptr) {
@@ -403,6 +406,20 @@ RC DiskBufferPool::get_this_page(PageNum page_num, Frame **frame)
       frame_manager_.replacement_policy().name(), page_io_backend_name(io_backend_type()), id(), page_num);
 
   scoped_lock lock_guard(lock_);  // 直接加了一把大锁，其实可以根据访问的页面来细化提高并行度
+
+  if ((rc = check_page_num(page_num)) != RC::SUCCESS) {
+    return rc;
+  }
+
+  // Another thread may have loaded the same page between the optimistic lookup
+  // and acquiring the file lock. Reuse that frame instead of creating a duplicate.
+  used_match_frame = frame_manager_.get(id(), page_num);
+  if (used_match_frame != nullptr) {
+    used_match_frame->access();
+    stats_.record_pin(used_match_frame->pin_count() == 1);
+    *frame = used_match_frame;
+    return RC::SUCCESS;
+  }
 
   // Allocate one page and load the data into this page
   Frame *allocated_frame = nullptr;
@@ -444,17 +461,17 @@ RC DiskBufferPool::allocate_page(Frame **frame)
       byte = i / 8;
       bit  = i % 8;
       if (((file_header_->bitmap[byte]) & (1 << bit)) == 0) {
-        (file_header_->allocated_pages)++;
-        file_header_->bitmap[byte] |= (1 << bit);
-        // TODO,  do we need clean the loaded page's data?
-        hdr_frame_->mark_dirty();
         LSN lsn = 0;
         rc = log_handler_.allocate_page(i, lsn);
         if (OB_FAIL(rc)) {
           LOG_ERROR("Failed to log allocate page %d, rc=%s", i, strrc(rc));
-          // 忽略了错误
+          lock_.unlock();
+          return rc;
         }
 
+        (file_header_->allocated_pages)++;
+        file_header_->bitmap[byte] |= (1 << bit);
+        hdr_frame_->mark_dirty();
         hdr_frame_->set_lsn(lsn);
 
         frame_manager_.stats().record_page_allocation();
@@ -465,7 +482,14 @@ RC DiskBufferPool::allocate_page(Frame **frame)
         LOG_DEBUG("allocate a new page without extend buffer pool. page num=%d, buffer pool=%d", i, id());
 
         lock_.unlock();
-        return get_this_page(i, frame);
+        rc = get_this_page(i, frame);
+        if (OB_FAIL(rc)) {
+          return rc;
+        }
+        (*frame)->clear_page();
+        (*frame)->set_lsn(lsn);
+        (*frame)->mark_dirty();
+        return RC::SUCCESS;
       }
     }
   }
@@ -481,7 +505,8 @@ RC DiskBufferPool::allocate_page(Frame **frame)
   rc = log_handler_.allocate_page(file_header_->page_count, lsn);
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to log allocate page %d, rc=%s", file_header_->page_count, strrc(rc));
-    // 忽略了错误
+    lock_.unlock();
+    return rc;
   }
   hdr_frame_->set_lsn(lsn);
 
@@ -538,6 +563,10 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
   }
   
   scoped_lock lock_guard(lock_);
+  RC validation_rc = check_page_num(page_num);
+  if (validation_rc != RC::SUCCESS) {
+    return validation_rc;
+  }
   Frame           *used_frame = frame_manager_.get(id(), page_num);
   if (used_frame != nullptr) {
     // frame_manager_.get adds one temporary pin. More than one means a scanner or
@@ -547,7 +576,6 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
       unpin_page(used_frame);
       return RC::LOCKED_UNLOCK;
     }
-    frame_manager_.free(id(), page_num, used_frame);
   } else {
     LOG_DEBUG("page not found in memory while disposing it. pageNum=%d", page_num);
   }
@@ -556,7 +584,14 @@ RC DiskBufferPool::dispose_page(PageNum page_num)
   RC rc = log_handler_.deallocate_page(page_num, lsn);
   if (OB_FAIL(rc)) {
     LOG_ERROR("Failed to log deallocate page %d, rc=%s", page_num, strrc(rc));
-    // ignore error handle
+    if (used_frame != nullptr) {
+      unpin_page(used_frame);
+    }
+    return rc;
+  }
+
+  if (used_frame != nullptr) {
+    frame_manager_.free(id(), page_num, used_frame);
   }
 
   hdr_frame_->set_lsn(lsn);
@@ -608,7 +643,11 @@ RC DiskBufferPool::purge_page(PageNum page_num)
 
   Frame           *used_frame = frame_manager_.get(id(), page_num);
   if (used_frame != nullptr) {
-    return purge_frame(page_num, used_frame, FlushReason::EXPLICIT);
+    RC rc = purge_frame(page_num, used_frame, FlushReason::EXPLICIT);
+    if (OB_FAIL(rc)) {
+      unpin_page(used_frame);
+    }
+    return rc;
   }
 
   return RC::SUCCESS;
@@ -618,13 +657,18 @@ RC DiskBufferPool::purge_all_pages(FlushReason reason)
 {
   list<Frame *> used = frame_manager_.find_list(id());
 
+  RC first_error = RC::SUCCESS;
   scoped_lock lock_guard(lock_);
-  for (list<Frame *>::iterator it = used.begin(); it != used.end(); ++it) {
-    Frame *frame = *it;
-
-    purge_frame(frame->page_num(), frame, reason);
+  for (Frame *frame : used) {
+    RC rc = purge_frame(frame->page_num(), frame, reason);
+    if (OB_FAIL(rc)) {
+      unpin_page(frame);
+      if (first_error == RC::SUCCESS) {
+        first_error = rc;
+      }
+    }
   }
-  return RC::SUCCESS;
+  return first_error;
 }
 
 RC DiskBufferPool::check_all_pages_unpinned()
@@ -821,7 +865,7 @@ RC DiskBufferPool::redo_deallocate_page(LSN lsn, PageNum page_num)
     return RC::SUCCESS;
   }
 
-  if (page_num >= file_header_->page_count) {
+  if (page_num < 0 || page_num >= file_header_->page_count) {
     LOG_WARN("page %d is not exist. file=%s", page_num, file_name_.c_str());
     return RC::INTERNAL;
   }
@@ -909,7 +953,7 @@ RC DiskBufferPool::allocate_frame(PageNum page_num, Frame **buffer)
 
 RC DiskBufferPool::check_page_num(PageNum page_num)
 {
-  if (page_num >= file_header_->page_count) {
+  if (page_num < 0 || page_num >= file_header_->page_count) {
     LOG_ERROR("Invalid pageNum:%d, file's name:%s", page_num, file_name_.c_str());
     return RC::BUFFERPOOL_INVALID_PAGE_NUM;
   }

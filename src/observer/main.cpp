@@ -125,7 +125,7 @@ void usage(const char *program)
   cout << "  -t, --transaction MODEL    vacuous or mvcc" << endl;
   cout << "  -T, --threads MODEL        one-thread-per-connection or java-thread-pool" << endl;
   cout << "  -n, --buffer-size BYTES    Buffer pool capacity" << endl;
-  cout << "  -r, --replacement POLICY   lru, fifo, or clock" << endl;
+  cout << "  -r, --replacement POLICY   lru, lru-k, fifo, or clock" << endl;
   cout << "      --io-backend BACKEND   legacy or positional" << endl;
   cout << "  -d, --durable              Enable disk durability" << endl;
   cout << "  -E, --engine ENGINE        heap" << endl;

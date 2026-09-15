@@ -22,7 +22,7 @@ CLI、Web 和 SDK 都不会自行解析或执行 SQL。它们只消费稳定的 
     csudbd --host 127.0.0.1 --port 6789
     csudbd --data-dir /path/to/data
     csudbd --buffer-size 20971520
-    csudbd --replacement lru       # lru | fifo | clock
+    csudbd --replacement lru       # lru | lru-k | fifo | clock
     csudbd --io-backend legacy     # legacy | positional
 
 native 是 csudb、Web Console 和 Python SDK 使用的正式协议。mysql 目前只是

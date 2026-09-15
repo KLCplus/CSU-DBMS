@@ -50,6 +50,7 @@ csudbd --host 127.0.0.1 --port 6789
 csudbd --data-dir /path/to/data
 csudbd --buffer-size 20971520
 csudbd --replacement lru
+csudbd --replacement lru-k
 csudbd --replacement fifo
 csudbd --replacement clock
 csudbd --io-backend legacy

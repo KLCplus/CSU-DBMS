@@ -1,6 +1,9 @@
 #include "storage/os/replacement/replacement_policy.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <deque>
+#include <limits>
 #include <list>
 #include <strings.h>
 #include <unordered_map>
@@ -98,6 +101,74 @@ public:
   const char *name() const override { return "FIFO"; }
 };
 
+class LRUKReplacementPolicy final : public ReplacementPolicy
+{
+public:
+  void on_insert(const FrameId &frame_id) override
+  {
+    on_remove(frame_id);
+    record_access(frame_id);
+  }
+
+  void on_access(const FrameId &frame_id) override { record_access(frame_id); }
+  void on_pin(const FrameId &) override {}
+  void on_unpin(const FrameId &) override {}
+
+  void on_remove(const FrameId &frame_id) override { histories_.erase(frame_id); }
+
+  bool choose_victim(const std::function<bool(const FrameId &)> &is_replaceable, FrameId &victim) override
+  {
+    bool found = false;
+    bool victim_is_cold = false;
+    uint64_t oldest_relevant_access = std::numeric_limits<uint64_t>::max();
+
+    for (const auto &[frame_id, history] : histories_) {
+      if (history.empty() || !is_replaceable(frame_id)) {
+        continue;
+      }
+
+      const bool cold = history.size() < K;
+      const uint64_t relevant_access = history.front();
+      if (!found || (cold && !victim_is_cold) ||
+          (cold == victim_is_cold && relevant_access < oldest_relevant_access)) {
+        victim = frame_id;
+        victim_is_cold = cold;
+        oldest_relevant_access = relevant_access;
+        found = true;
+      }
+    }
+    return found;
+  }
+
+  string metadata(const FrameId &frame_id) const override
+  {
+    const auto iter = histories_.find(frame_id);
+    if (iter == histories_.end()) {
+      return "history=unknown";
+    }
+    stringstream ss;
+    ss << "k=2,history=" << iter->second.size()
+       << ",class=" << (iter->second.size() < K ? "cold" : "hot");
+    return ss.str();
+  }
+
+  const char *name() const override { return "LRU-K"; }
+
+private:
+  void record_access(const FrameId &frame_id)
+  {
+    auto &history = histories_[frame_id];
+    if (history.size() == K) {
+      history.pop_front();
+    }
+    history.push_back(++current_timestamp_);
+  }
+
+  static constexpr size_t K = 2;
+  uint64_t current_timestamp_ = 0;
+  std::unordered_map<FrameId, std::deque<uint64_t>, FrameIdHasher> histories_;
+};
+
 class ClockReplacementPolicy final : public ReplacementPolicy
 {
 public:
@@ -192,6 +263,7 @@ const char *buffer_pool_replacement_policy_name(BufferPoolReplacementPolicy poli
 {
   switch (policy) {
     case BufferPoolReplacementPolicy::LRU: return "LRU";
+    case BufferPoolReplacementPolicy::LRU_K: return "LRU-K";
     case BufferPoolReplacementPolicy::FIFO: return "FIFO";
     case BufferPoolReplacementPolicy::CLOCK: return "CLOCK";
   }
@@ -202,6 +274,11 @@ bool parse_buffer_pool_replacement_policy(const string &name, BufferPoolReplacem
 {
   if (strcasecmp(name.c_str(), "lru") == 0) {
     policy = BufferPoolReplacementPolicy::LRU;
+    return true;
+  }
+  if (strcasecmp(name.c_str(), "lru-k") == 0 || strcasecmp(name.c_str(), "lruk") == 0 ||
+      strcasecmp(name.c_str(), "lru_k") == 0) {
+    policy = BufferPoolReplacementPolicy::LRU_K;
     return true;
   }
   if (strcasecmp(name.c_str(), "fifo") == 0) {
@@ -219,6 +296,7 @@ unique_ptr<ReplacementPolicy> create_replacement_policy(BufferPoolReplacementPol
 {
   switch (policy) {
     case BufferPoolReplacementPolicy::LRU: return make_unique<LRUReplacementPolicy>();
+    case BufferPoolReplacementPolicy::LRU_K: return make_unique<LRUKReplacementPolicy>();
     case BufferPoolReplacementPolicy::FIFO: return make_unique<FIFOReplacementPolicy>();
     case BufferPoolReplacementPolicy::CLOCK: return make_unique<ClockReplacementPolicy>();
   }

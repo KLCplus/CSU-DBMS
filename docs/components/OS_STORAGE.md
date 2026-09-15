@@ -72,7 +72,7 @@ BPFrameManager
     v             v
 Frame/Page   ReplacementPolicy
                   |
-             LRU/FIFO/CLOCK
+             LRU/LRU-K/FIFO/CLOCK
           |
           v
 PageIOBackend
@@ -232,6 +232,7 @@ BPFrameManager
     v
 ReplacementPolicy
 ├── LRUReplacementPolicy
+├── LRUKReplacementPolicy (K=2)
 ├── FIFOReplacementPolicy
 └── ClockReplacementPolicy
 ```
@@ -247,6 +248,12 @@ ReplacementPolicy
 ```text
 victim = 2
 ```
+
+### LRU-K（K=2，个人性能创新）
+
+每个 Frame 保存最近两次访问的逻辑时间戳。访问不足两次的冷页优先淘汰；热页按倒数第二次访问时间选择 victim。该策略让一次性顺序扫描页停留在冷集合，避免挤出被反复访问的热点页。pinned Frame 与其他策略一样不可淘汰；snapshot 元数据会显示 `k=2`、history 数量和 hot/cold 分类。
+
+固定负载为 4 个数据 Frame、2 个热点页、每轮 4 个只访问一次的扫描页。真实分页文件测试中，50 轮结果为：LRU 读取 302 页、命中率 1.31%；LRU-K 读取 202 页、命中率 33.99%，物理读减少 33.11%。该结果来自 `buffer_pool_os_test` 的可重复断言，不代表所有 workload 下均优于 LRU。
 
 ### FIFO
 
@@ -266,6 +273,7 @@ victim = 1
 
 ```bash
 csudbd --replacement lru
+csudbd --replacement lru-k
 csudbd --replacement fifo
 csudbd --replacement clock
 ```

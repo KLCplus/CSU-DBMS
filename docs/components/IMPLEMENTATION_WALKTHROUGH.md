@@ -157,7 +157,7 @@ Browser → HTTP API → csudb_web.py → Python SDK → Native → csudbd
 src/observer/storage/os/
 ├── page/          Page、Frame、pin、dirty、latch
 ├── buffer/        DiskBufferPool、BufferPoolManager、DoubleWrite
-├── replacement/   LRU、FIFO、CLOCK
+├── replacement/   LRU、LRU-K、FIFO、CLOCK
 ├── io/            legacy、positional I/O
 └── diagnostics/   Stats、Snapshot、Trace、BufferPool Log
 ```
