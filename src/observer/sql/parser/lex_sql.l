@@ -1,4 +1,21 @@
 %top{
+/**
+ * @file lex_sql.l
+ * @brief Flex 词法分析器定义：把 SQL 文本切分为 Bison 可识别的 token
+ * @ingroup SQLParser
+ * @details 本文件是编译器流水线的第一环：
+ *   SQL 文本 --(本文件, Flex DFA)--> token 流 --(Bison LALR)--> ParsedSqlNode AST
+ *   --(ParseStage)--> --(ResolveStage)--> Stmt。
+ * 核心实现原则：
+ *   1. Flex 依据正则的“最长匹配优先、先定义优先”规则把输入切分；
+ *   2. 每个关键字 token 通过 RETURN_TOKEN 宏返回，并把语义值写入 yylval（即 bison
+ *      %union 联合体）；
+ *   3. 借助 YY_USER_ACTION 记录 <行,列> 位置，供语法/语义错误定位；
+ *   4. 字符串字面量的内存用 strdup 分配并登记到 yyextra 的 vector 中，由
+ *      yacc_sql.y 的 sql_parse 统一释放，避免内存泄漏；
+ *   5. 规则区注释必须缩进，否则会被 flex 误当作正则。
+ */
+
 /*
 这里的代码会被复制到lex_sql.cpp的最开始位置
 定义yy_size_t的原因是因为flex生成的代码，会使用yy_size_t与其他类型的数字
@@ -63,12 +80,15 @@ extern double atof();
 %option case-insensitive
 %option bison-locations
 
+/* 词法宏定义：空白字符、数字、标识符、点号、引号 */
 WHITE_SPACE      [\ \t\b\f]
 DIGIT            [0-9]+
 
+/* ID 以字母或下划线开头，后续可跟字母/数字/下划线（关键字也走此规则，靠规则顺序优先匹配） */
 ID               [A-Za-z_]+[A-Za-z0-9_]*
 DOT              \.
 QUOTE            [\'\"]
+/* 独占起始状态：STR 用于字符串（当前未使用），COMMENT 用于块注释 */
 %x STR
 %x COMMENT
 
@@ -79,6 +99,7 @@ QUOTE            [\'\"]
 /* yylval 就可以认为是 yacc 中 %union 定义的结构体(union 结构) */
 %%
 
+  /* 空白与注释：忽略空格/制表等、单独处理换行以重置列号，丢弃 -- 行注释与块注释 */
 {WHITE_SPACE}                                        // ignore whitespace
 \n                                                   { yycolumn = 1; }
 "--"[^\n]*                                           ;
@@ -87,9 +108,11 @@ QUOTE            [\'\"]
 <COMMENT>[^*]+                                       ;
 <COMMENT>\*                                          ;
 
+  /* 数字字面量：纯数字返回 NUMBER（语义值 int），带小数点的返回 FLOAT（语义值 float） */
 {DIGIT}+                           yylval->number=atoi(yytext); RETURN_TOKEN(NUMBER);
 {DIGIT}+{DOT}{DIGIT}+              yylval->floats=(float)(atof(yytext)); RETURN_TOKEN(FLOAT);
 
+  /* 标点与保留字：分号/点号及全部 SQL 关键字，大小写不敏感地映射为同名 token */
 ";"                                     RETURN_TOKEN(SEMICOLON);
 {DOT}                                   RETURN_TOKEN(DOT);
 EXIT                                    RETURN_TOKEN(EXIT);
@@ -106,21 +129,25 @@ JOIN                                    RETURN_TOKEN(JOIN);
 INNER                                   RETURN_TOKEN(INNER);
 SHOW                                    RETURN_TOKEN(SHOW);
 SYNC                                    RETURN_TOKEN(SYNC);
+  /* 查询类关键字：SELECT / CALC / FROM / WHERE / AND / OR */
 SELECT                                  RETURN_TOKEN(SELECT);
 CALC                                    RETURN_TOKEN(CALC);
 FROM                                    RETURN_TOKEN(FROM);
 WHERE                                   RETURN_TOKEN(WHERE);
 AND                                     RETURN_TOKEN(AND);
 OR                                      RETURN_TOKEN(OR);
+  /* DML 关键字：INSERT / INTO / VALUES / DELETE / UPDATE / SET */
 INSERT                                  RETURN_TOKEN(INSERT);
 INTO                                    RETURN_TOKEN(INTO);
 VALUES                                  RETURN_TOKEN(VALUES);
 DELETE                                  RETURN_TOKEN(DELETE);
 UPDATE                                  RETURN_TOKEN(UPDATE);
 SET                                     RETURN_TOKEN(SET);
+  /* 事务关键字：BEGIN/COMMIT/ROLLBACK 分别映射为 TRX_BEGIN/TRX_COMMIT/TRX_ROLLBACK */
 BEGIN                                   RETURN_TOKEN(TRX_BEGIN);
 COMMIT                                  RETURN_TOKEN(TRX_COMMIT);
 ROLLBACK                                RETURN_TOKEN(TRX_ROLLBACK);
+  /* NULL 判定与类型关键字：NULL/IS/NOT 及 INT/CHAR/FLOAT/VECTOR/DATE */
 NULL                                    RETURN_TOKEN(NULL_T);
 IS                                      RETURN_TOKEN(IS);
 NOT                                     RETURN_TOKEN(NOT);
@@ -129,9 +156,11 @@ CHAR                                    RETURN_TOKEN(STRING_T);
 FLOAT                                   RETURN_TOKEN(FLOAT_T);
 VECTOR                                  RETURN_TOKEN(VECTOR_T);
 DATE                                    RETURN_TOKEN(DATE);
+  /* LOAD DATA 导入关键字：LOAD/DATA/INFILE */
 LOAD                                    RETURN_TOKEN(LOAD);
 DATA                                    RETURN_TOKEN(DATA);
 INFILE                                  RETURN_TOKEN(INFILE);
+  /* EXPLAIN 及 GROUP BY / ORDER BY / 建表存储格式等子句关键字 */
 EXPLAIN                                 RETURN_TOKEN(EXPLAIN);
 GROUP                                   RETURN_TOKEN(GROUP);
 BY                                      RETURN_TOKEN(BY);
@@ -140,14 +169,18 @@ STORAGE                                 RETURN_TOKEN(STORAGE);
 FORMAT                                  RETURN_TOKEN(FORMAT);
 PRIMARY                                 RETURN_TOKEN(PRIMARY);
 KEY                                     RETURN_TOKEN(KEY);
+  /* ANALYZE 及 LOAD 的字段分隔/包围符关键字 */
 ANALYZE                                 RETURN_TOKEN(ANALYZE);
 FIELDS                                  RETURN_TOKEN(FIELDS);
 TERMINATED                              RETURN_TOKEN(TERMINATED);
 ENCLOSED                                RETURN_TOKEN(ENCLOSED);
+  /* 标识符：返回 ID；strdup 字符串登记到 yyextra，解析结束后统一 free 防止泄漏 */
 {ID}                                    yylval->cstring=strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(ID);
+  /* 括号：左/右圆括号分别返回 LBRACE / RBRACE（注意命名不同于花括号） */
 "("                                     RETURN_TOKEN(LBRACE);
 ")"                                     RETURN_TOKEN(RBRACE);
 
+  /* 逗号与比较运算符：== 与 = 都返回 EQ，<> 与 != 都返回 NE */
 ","                                     RETURN_TOKEN(COMMA);
 "=="                                    RETURN_TOKEN(EQ);
 "="                                     RETURN_TOKEN(EQ);
@@ -158,16 +191,26 @@ ENCLOSED                                RETURN_TOKEN(ENCLOSED);
 ">="                                    RETURN_TOKEN(GE);
 ">"                                     RETURN_TOKEN(GT);
 
+  /* 算术运算符：直接返回字符本身，由 bison 的字符字面量终结符接收 */
 "+" |
 "-" |
 "*" |
 "/"                                     { return yytext[0]; }
+  /* 字符串字面量：单/双引号包裹均返回 SSS，原始串同样登记到 yyextra；转义在语法动作里还原 */
 \"([^"\\]|\\.|\"\")*\"                   yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 \'([^'\\]|\\.|\'\')*\'                   yylval->cstring = strdup(yytext); static_cast<std::vector<char*>*>(yyextra)->push_back(yylval->cstring); RETURN_TOKEN(SSS);
 
+  /* 兜底规则：未识别字符记日志并原样返回，最终由 bison 报告语法错误 */
 .                                       LOG_DEBUG("Unknown character [%c]",yytext[0]); return yytext[0];
 %%
 
+/**
+ * @brief 把待解析的字符串设置为词法扫描器的输入缓冲区
+ * @param str     以 '\0' 结尾的 SQL 字符串
+ * @param scanner 由 yylex_init_extra 创建的、可重入的词法扫描器句柄
+ * @details 实现原理：yy_scan_string 为字符串新建一个内部缓冲区，yy_switch_to_buffer
+ * 把 scanner 切换过去。调用方（yacc_sql.y 的 sql_parse）随后用 yylex_destroy 释放。
+ */
 void scan_string(const char *str, yyscan_t scanner) {
   yy_switch_to_buffer(yy_scan_string(str, scanner), scanner);
 }

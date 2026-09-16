@@ -12,6 +12,19 @@ See the Mulan PSL v2 for more details. */
 // Created by Meiyi
 //
 
+/**
+ * @file parse_defs.h
+ * @brief SQL 语法树（AST）节点的数据结构定义
+ * @ingroup SQLParser
+ * @details 本文件定义了 Bison 语法分析结果的数据载体，处于编译器流水线中
+ *   SQL 文本 -> Flex token -> Bison LALR -> ParsedSqlNode AST
+ *   -> ParseStage -> ResolveStage -> Stmt 的“AST”一环。
+ * 核心实现原则：每个 SQL 语句（select/insert/update/delete/create 等）对应一个
+ * 结构体，统一挂在 ParsedSqlNode 上，通过 SqlCommandFlag 区分类型；解析阶段只记录
+ * 语法结构（表名、字段名、常量、表达式等文本/值），不访问数据库元数据，所有语义
+ * 校验推迟到 ResolveStage。各节点均支持表达式（Expression）以承载 WHERE/算术/聚合等。
+ */
+
 #pragma once
 
 #include "common/lang/string.h"
@@ -354,7 +367,15 @@ public:
   SetVariableSqlNode  set_variable;
 
 public:
+  /**
+   * @brief 默认构造函数：语句类型置为 SCF_ERROR
+   * @details 默认即错误态，未被显式赋值的节点会被视为解析失败，属于防御性设计。
+   */
   ParsedSqlNode();
+  /**
+   * @brief 以指定命令类型构造节点
+   * @param flag SQL 命令类型，用于后续阶段分派处理
+   */
   explicit ParsedSqlNode(SqlCommandFlag flag);
 };
 
@@ -365,8 +386,18 @@ public:
 class ParsedSqlResult
 {
 public:
+  /**
+   * @brief 追加一条已解析的 SQL 语句
+   * @param sql_node 语句节点（独占所有权，移动语义）
+   * @details 实现原理：emplace_back + move，零深拷贝地接管节点所有权。
+   */
   void add_sql_node(unique_ptr<ParsedSqlNode> sql_node);
 
+  /**
+   * @brief 获取解析出的全部语句节点
+   * @return 语句节点列表的可变引用
+   * @details ParseStage 用它判断是否为空、是否存在 SCF_ERROR，并取出首个节点。
+   */
   vector<unique_ptr<ParsedSqlNode>> &sql_nodes() { return sql_nodes_; }
 
 private:

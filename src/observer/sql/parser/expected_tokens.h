@@ -10,6 +10,19 @@ See the Mulan PSL v2 for more details. */
 
 #pragma once
 
+/**
+ * @file expected_tokens.h
+ * @brief 自动补全：暴露 SQL 前缀处合法的终结符集合
+ * @ingroup SQLParser
+ * @details 本文件服务于编译器的“智能提示”能力，复用同一条流水线
+ *   SQL 文本 -> Flex token -> Bison LALR -> ParsedSqlNode AST
+ *   -> ParseStage -> ResolveStage -> Stmt，
+ * 直接向 Bison 的 LALR 状态机询问“下一个合法 token 有哪些”。
+ * 核心实现原则：不另建语法分析器，而是在输入末尾追加一个非法哨兵字符触发语法错误，
+ * 再借 Bison `%define parse.error custom` 的 yypcontext_expected_tokens 取出期望集合，
+ * 从而让补全与语法诊断共享同一份语法信息。
+ */
+
 #include <string>
 #include <vector>
 

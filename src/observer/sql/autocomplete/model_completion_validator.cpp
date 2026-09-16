@@ -20,10 +20,26 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 
+/**
+ * @file model_completion_validator.cpp
+ * @ingroup SQLAutocomplete
+ * @brief 模型输出校验与最长合法前缀裁剪的实现
+ *
+ * 本文件对模型原始输出做清洗、门禁与语法/目录校验，必要时裁剪为最长合法前缀。
+ * 核心原则：模型输出只是候选，必须通过同一套 Parser 与 Catalog 的检验才能进入 UI。
+ */
+
 namespace {
 
+/// 模型输出允许保留的最大字符数，超出部分直接截断
 constexpr size_t MAX_MODEL_CHARS = 256;
 
+/**
+ * @brief 将字符串逐字节转大写（ASCII）
+ * @param text 输入字符串
+ * @return 转换后的副本
+ * @details 实现原理：复制后遍历每个 char，用 std::toupper（先转 unsigned char）转换。
+ */
 std::string to_upper(const std::string &text)
 {
   std::string result = text;
@@ -33,6 +49,12 @@ std::string to_upper(const std::string &text)
   return result;
 }
 
+/**
+ * @brief 去除字符串首尾空白
+ * @param text 输入字符串
+ * @return 去掉首尾空白后的子串
+ * @details 实现原理：双指针从两端跳过 isspace 字符，返回中间子串。
+ */
 std::string trim(const std::string &text)
 {
   size_t begin = 0;
@@ -46,7 +68,16 @@ std::string trim(const std::string &text)
   return text.substr(begin, end - begin);
 }
 
-// 去掉 Markdown 代码围栏、解释性前缀、FIM special token
+/**
+ * @brief 清洗模型原始输出
+ * @param raw 模型返回的原始字符串
+ * @return 清洗后的文本
+ * @details 实现原理：
+ *          1. 删除所有 `<|...|>` 形式的 FIM/特殊 token（找不到闭合时删除到末尾）；
+ *          2. 若包含 ``` 围栏，则按行重排，丢弃所有含 ``` 的行；
+ *          3. 若以小写 "here is " 开头，则丢弃第一行解释，保留其后内容；
+ *          4. 最后 trim 首尾空白。
+ */
 std::string clean(const std::string &raw)
 {
   std::string text = raw;
@@ -100,13 +131,20 @@ std::string clean(const std::string &raw)
   return trim(text);
 }
 
+/**
+ * @brief 判断一段前缀是否语法合法
+ * @param prefix 待测文本
+ * @return true 表示语法错误只发生在末尾哨兵处（prefix 本身合法）
+ * @details 实现原理：末尾追加哨兵 '\x01' 后调用 collect_expected_tokens，
+ *          先按 prefix 计算哨兵应处的行列，再与 Parser 报告的错误行列比较，一致即合法。
+ */
 bool prefix_is_valid(const std::string &prefix)
 {
   std::vector<std::string> tokens;
   int                      line = 0;
   int                      col  = 0;
   std::string              probe = prefix;
-  probe.push_back('\x01');
+  probe.push_back('\x01');  // 哨兵：强制 Parser 在末尾报错，以提取期望集合
 
   int sentinel_line = 1;
   int sentinel_col  = 1;
@@ -122,6 +160,15 @@ bool prefix_is_valid(const std::string &prefix)
   return line == sentinel_line && col == sentinel_col;
 }
 
+/**
+ * @brief 校验文本中的 `表.列` 限定名是否都真实存在
+ * @param context 补全上下文（提供 Db）
+ * @param text 待校验文本
+ * @return true 表示所有 `表.列` 组合都存在，或没有此类组合
+ * @details 实现原理：分词后滑动扫描 Word('.' )Word 三元组；对每个限定名，
+ *          先在 db 中查找表，再在表 meta 中查找列，任一缺失即返回 false。
+ *          db 为空时直接返回 true（无从校验）。
+ */
 bool catalog_identifiers_valid(const CompletionContext &context, const std::string &text)
 {
   if (context.db == nullptr) {
@@ -144,7 +191,15 @@ bool catalog_identifiers_valid(const CompletionContext &context, const std::stri
   return true;
 }
 
-// 逐 token 从末尾裁剪，返回最长合法前缀
+/**
+ * @brief 求文本的最长合法前缀
+ * @param context 补全上下文
+ * @param text 待裁剪文本
+ * @return 最长的、拼到 statement_prefix 后语法合法且 Catalog 标识符存在的子串；找不到返回空串
+ * @details 实现原理：先分词，然后从 token 数量 count 由大到小（即从末尾逐 token 回退），
+ *          取 text 到第 count 个 token 末尾的子串并 trim；依次通过 prefix_is_valid 与
+ *          catalog_identifiers_valid 校验，首个通过者即返回；全部失败返回空串。
+ */
 std::string longest_valid_prefix(const CompletionContext &context, const std::string &text)
 {
   std::vector<SqlTextToken> tokens;
@@ -168,6 +223,19 @@ std::string longest_valid_prefix(const CompletionContext &context, const std::st
 
 }  // namespace
 
+/**
+ * @brief 校验并清洗模型输出
+ * @param context 补全上下文（statement_prefix 与 Db）
+ * @param model_text 模型原始输出
+ * @return 校验结果；accepted=true 时 text 为可安全展示的补全内容
+ * @details 实现原理：
+ *          1. clean 清洗，空则拒绝（reason=empty after cleaning）；
+ *          2. 超过 MAX_MODEL_CHARS 截断；再截到第一个分号（只取一条语句）；
+ *          3. 方言过滤：遇到禁用关键字则在它之前截断，空则拒绝（blocked by dialect filter）；
+ *          4. Parser 校验：prefix + text 不合法时取最长合法前缀，空则拒绝（failed parser validation）；
+ *          5. Catalog 校验：`表.列` 不存在时同样取最长合法前缀，空则拒绝（failed catalog validation）；
+ *          6. 通过则 accepted=true 并返回最终 text。
+ */
 ValidationResult ModelCompletionValidator::validate(const CompletionContext &context, std::string_view model_text) const
 {
   ValidationResult result;
@@ -203,6 +271,7 @@ ValidationResult ModelCompletionValidator::validate(const CompletionContext &con
     return result;
   }
 
+  // 整体不合法时退化为最长合法前缀（可能仍对用户有用）
   if (!prefix_is_valid(context.statement_prefix + text)) {
     text = longest_valid_prefix(context, text);
     if (text.empty()) {
@@ -211,6 +280,7 @@ ValidationResult ModelCompletionValidator::validate(const CompletionContext &con
     }
   }
 
+  // 再确认所有 `表.列` 限定名真实存在
   if (!catalog_identifiers_valid(context, text)) {
     text = longest_valid_prefix(context, text);
     if (text.empty()) {

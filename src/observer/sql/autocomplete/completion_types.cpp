@@ -10,6 +10,22 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/autocomplete/completion_types.h"
 
+/**
+ * @file completion_types.cpp
+ * @ingroup SQLAutocomplete
+ * @brief completion_types.h 中数据结构的字符串化实现
+ *
+ * 本文件只负责把枚举值映射为稳定的协议字符串，供 native 协议与 Web Console 消费。
+ * 核心原则：映射必须一一对应且保持稳定，未知枚举值统一返回 "unknown" 而不是崩溃。
+ */
+
+/**
+ * @brief 将候选种类转换为稳定的字符串名
+ * @param kind 候选种类
+ * @return 对应的小写字符串；未知取值返回 "unknown"
+ * @details 实现原理：对 CompletionKind 做穷举 switch；
+ *          所有枚举分支都返回后，末尾兜底返回 "unknown" 以防御非法取值。
+ */
 const char *completion_kind_name(CompletionKind kind)
 {
   switch (kind) {
@@ -26,6 +42,13 @@ const char *completion_kind_name(CompletionKind kind)
   return "unknown";
 }
 
+/**
+ * @brief 将候选来源转换为稳定的字符串名
+ * @param source 候选来源
+ * @return 对应的小写字符串；未知取值返回 "unknown"
+ * @details 实现原理：对 CompletionSource 做穷举 switch；
+ *          所有枚举分支都返回后，末尾兜底返回 "unknown" 以防御非法取值。
+ */
 const char *completion_source_name(CompletionSource source)
 {
   switch (source) {

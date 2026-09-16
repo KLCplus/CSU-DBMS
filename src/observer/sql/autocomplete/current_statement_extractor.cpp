@@ -14,6 +14,28 @@ See the Mulan PSL v2 for more details. */
 
 #include "sql/autocomplete/sql_text_scanner.h"
 
+/**
+ * @file current_statement_extractor.cpp
+ * @ingroup SQLAutocomplete
+ * @brief 光标所在 SQL statement 的提取实现
+ *
+ * 本文件是补全请求进入解析器之前的定位步骤，保证后续语法/目录补全只作用于单条语句。
+ * 核心原则：仅根据分词器判定为 Symbol 且文本为 ";" 的 token 切分，
+ * 因此字符串内或注释内的分号不会造成错误切分。
+ */
+
+/**
+ * @brief 定位光标所在的单条 SQL statement
+ * @param sql 完整 SQL 文本
+ * @param cursor 光标偏移；越界时会被截断到 sql.size()
+ * @return 光标所在 statement 的 [begin, end) 范围，found 恒为 true
+ * @details 实现原理：
+ *          1. cursor 越界时钳制到 sql.size()；
+ *          2. scan_sql_text 对全文分词，收集所有类型为 Symbol 且文本为 ";" 的 token 起点；
+ *          3. 按顺序遍历分隔符，找到第一个 >= cursor 的位置作为 end，
+ *             其前一个分隔符 +1 作为 begin；找到即返回；
+ *          4. 若光标位于最后一个分号之后，则 begin 为最后一个分号 +1，end 为全文末尾。
+ */
 StatementSlice find_statement_at_cursor(std::string_view sql, size_t cursor)
 {
   StatementSlice slice;

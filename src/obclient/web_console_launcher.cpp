@@ -25,26 +25,42 @@ namespace {
 
 namespace fs = std::filesystem;
 
-/** @brief 返回用户主目录，取不到 HOME 时退回当前目录 */
+/**
+ * @brief 返回用户主目录
+ * @return HOME 环境变量的值；未设置时返回 "."（当前目录）
+ * @details 读取 HOME，空指针时退回当前目录，保证状态目录总有可写落点。
+ */
 std::string home_directory()
 {
   const char *home = std::getenv("HOME");
   return home == nullptr ? "." : home;
 }
 
-/** @brief 返回状态目录，固定为 ~/.csudb */
+/**
+ * @brief 返回状态目录，固定为 ~/.csudb
+ * @return 主目录下的 .csudb 路径
+ * @details 用 std::filesystem 拼接主目录与固定子目录名。
+ */
 fs::path state_directory()
 {
   return fs::path(home_directory()) / ".csudb";
 }
 
-/** @brief 返回记录 Web 进程号的 pid 文件路径 */
+/**
+ * @brief 返回记录 Web 进程号的 pid 文件路径
+ * @return 状态目录下的 web.pid 路径
+ * @details 由状态目录派生，随主目录变化自动定位。
+ */
 fs::path pid_path()
 {
   return state_directory() / "web.pid";
 }
 
-/** @brief 返回 Web 控制台的日志文件路径 */
+/**
+ * @brief 返回 Web 控制台的日志文件路径
+ * @return 状态目录下的 web.log 路径
+ * @details Web 子进程的标准输出与错误都会被重定向到这个文件。
+ */
 fs::path log_path()
 {
   return state_directory() / "web.log";
@@ -53,6 +69,8 @@ fs::path log_path()
 /**
  * @brief 从 pid 文件读出进程号
  * @details 读不到或读到不大于 1 的值都视为无效，避免把 init 进程当成目标。
+ * @param pid 输出参数，读取到的进程号
+ * @return 读到一个大于 1 的合法 pid 返回 true，否则返回 false
  */
 bool read_pid(pid_t &pid)
 {
@@ -67,6 +85,8 @@ bool read_pid(pid_t &pid)
  * @brief 判断给定 pid 是否真的是 CSUDB Web 进程
  * @details 先确认进程存在，再读 /proc 下的命令行，只有包含 csudb-web 或
  * csudb_web.py 才算命中。系统会复用 pid，只比对号码可能误伤无关进程。
+ * @param pid 待检查的进程号
+ * @return 进程存在且命令行匹配 Web 助手返回 true，否则返回 false
  */
 bool is_web_process(pid_t pid)
 {
@@ -78,7 +98,11 @@ bool is_web_process(pid_t pid)
   return value.find("csudb-web") != std::string::npos || value.find("csudb_web.py") != std::string::npos;
 }
 
-/** @brief 通过 /proc/self/exe 取得当前可执行文件的绝对路径 */
+/**
+ * @brief 通过 /proc/self/exe 取得当前可执行文件的绝对路径
+ * @return 可执行文件路径；readlink 失败时返回空路径
+ * @details 读取符号链接内容并补 NUL 结尾，用于相对自身定位助手脚本。
+ */
 fs::path executable_path()
 {
   std::vector<char> buffer(4096);
@@ -92,6 +116,7 @@ fs::path executable_path()
  * @brief 定位 Web 助手脚本
  * @details 查找顺序是：环境变量显式指定、可执行文件同目录（开发构建）、
  * 上级 libexec 目录（安装后布局）。三处都没有就返回空路径。
+ * @return 找到的助手脚本路径；都没命中时返回空路径
  */
 fs::path find_web_script()
 {
@@ -110,14 +135,24 @@ fs::path find_web_script()
   return {};
 }
 
-/** @brief 删除残留的 pid 文件 */
+/**
+ * @brief 删除残留的 pid 文件
+ * @return 无返回值
+ * @details 使用带 error_code 的重载，不存在或失败都静默忽略。
+ */
 void remove_stale_pid_file()
 {
   std::error_code error;
   fs::remove(pid_path(), error);
 }
 
-/** @brief 确保状态目录存在并设为仅属主可访问，失败时写入错误说明 */
+/**
+ * @brief 确保状态目录存在并设为仅属主可访问
+ * @param message 输出参数，失败时写入具体错误说明
+ * @return 创建成功返回 true，失败返回 false
+ * @details 用 create_directories 递归创建，再用 chmod S_IRWXU 收紧权限，
+ *  避免 pid 与日志等状态被其他用户读取。
+ */
 bool ensure_state_directory(std::string &message)
 {
   std::error_code error;
@@ -134,6 +169,8 @@ bool ensure_state_directory(std::string &message)
  * @brief 用系统默认浏览器打开地址
  * @details fork 出子进程后把标准输出与错误重定向到 /dev/null，
  * 再替换成 xdg-open，避免浏览器输出污染 CLI 的终端。
+ * @param url 要打开的地址，例如 127.0.0.1:8765 的本地地址
+ * @return 无返回值；父进程 fork 后立即返回，不等待浏览器
  */
 void open_browser(const std::string &url)
 {
@@ -154,6 +191,7 @@ void open_browser(const std::string &url)
 /**
  * @brief 查询 Web 控制台是否在运行
  * @details 进程不存在或 pid 已对不上时顺手清掉残留的 pid 文件。
+ * @param message 输出参数，运行时写入 pid 与日志路径，否则写入未运行提示
  * @return 正在运行返回 true，并把 pid 与日志路径写进 message
  */
 bool web_console_status(std::string &message)
@@ -177,6 +215,7 @@ bool web_console_status(std::string &message)
  * 父进程轮询最多约一秒，确认 pid 文件出现且进程确实在跑才算启动成功。
  * @param options 数据库地址、Web 端口与是否打开浏览器
  * @param message 输出参数，成功时给出访问地址与日志路径
+ * @return 启动成功（或本已在运行）返回 true，端口非法、目录/脚本缺失或启动超时返回 false
  */
 bool start_web_console(const WebConsoleOptions &options, std::string &message)
 {
@@ -255,6 +294,8 @@ bool start_web_console(const WebConsoleOptions &options, std::string &message)
  * @brief 停止 Web 控制台
  * @details 先确认 pid 对应的确实是本项目的 Web 进程，再发 SIGTERM，
  * 随后最多等约一秒确认退出，最后清掉 pid 文件。只终止经双重确认的进程。
+ * @param message 输出参数，写入停止结果或未运行提示
+ * @return 成功发出终止信号返回 true；未运行或 kill 失败返回 false
  */
 bool stop_web_console(std::string &message)
 {

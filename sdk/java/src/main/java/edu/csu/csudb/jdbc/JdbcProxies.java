@@ -96,6 +96,14 @@ final class JdbcProxies {
     private int networkTimeout;
     private Connection proxy;
 
+    /**
+     * 记录连接所需的全部状态。
+     *
+     * @param client   底层 Native 协议客户端
+     * @param url      原始 JDBC URL，供 DatabaseMetaData 使用
+     * @param user     登录账号
+     * @param database 当前数据库名，可随后续 USE 变更
+     */
     ConnectionHandler(NativeClient client, String url, String user, String database) {
       this.client = client;
       this.url = url;
@@ -103,6 +111,18 @@ final class JdbcProxies {
       this.database = database;
     }
 
+    /**
+     * Connection 代理的统一入口。
+     *
+     * <p>实现原理：先处理 Object 三方法与 Wrapper 协议，再用 switch 按方法名分发；
+     * 未列出的方法一律抛 SQLFeatureNotSupportedException，从而让不支持的能力显式失败。
+     *
+     * @param object 代理对象本身
+     * @param method 被调用的接口方法
+     * @param args   调用参数，可能为 null
+     * @return 方法的返回值
+     * @throws Throwable 透传底层 SQLException 或不支持异常
+     */
     @Override
     public Object invoke(Object object, Method method, Object[] args) throws Throwable {
       if (isObjectMethod(method)) return objectMethod(object, method, args, "CSUDB Connection[" + url + "]");
@@ -140,6 +160,15 @@ final class JdbcProxies {
       };
     }
 
+    /**
+     * 切换自动提交模式。
+     *
+     * <p>原理：服务端没有独立的提交开关，开启自动提交前先 COMMIT 结算此前事务，
+     * 关闭则发 BEGIN 开启显式事务；值未变化时直接返回，避免多余往返。
+     *
+     * @param value 目标自动提交标志
+     * @throws SQLException 连接已关闭或服务端返回错误
+     */
     private void setAutoCommit(boolean value) throws SQLException {
       ensureOpen();
       if (autoCommit == value) return;
@@ -147,12 +176,25 @@ final class JdbcProxies {
       autoCommit = value;
     }
 
+    /**
+     * 切换当前数据库。
+     *
+     * <p>由于库名会被直接拼进 SQL，先用正则白名单校验，防止注入；非法名抛 SQLState 3D000。
+     *
+     * @param value 目标数据库名
+     * @throws SQLException 名称为 null/非法，或 USE 执行失败
+     */
     private void setDatabase(String value) throws SQLException {
       if (value == null || !value.matches("[A-Za-z_][A-Za-z0-9_]*")) throw new SQLException("invalid database name", "3D000");
       client.query("USE " + value + ";");
       database = value;
     }
 
+    /**
+     * 确认连接仍可用。
+     *
+     * @throws SQLException 连接已关闭，SQLState 08003
+     */
     private void ensureOpen() throws SQLException {
       if (client.isClosed()) throw new SQLException("CSUDB connection is closed", "08003");
     }
@@ -181,11 +223,28 @@ final class JdbcProxies {
     private int queryTimeout;
     private boolean closed;
 
+    /**
+     * @param connection  所属连接处理器，用于取 NativeClient 与回传 Connection 代理
+     * @param preparedSql 预编译 SQL 模板；null 表示普通 Statement（每次调用自带 SQL）
+     */
     StatementHandler(ConnectionHandler connection, String preparedSql) {
       this.connection = connection;
       this.preparedSql = preparedSql;
     }
 
+    /**
+     * Statement/PreparedStatement 代理的统一入口。
+     *
+     * <p>实现原理：若是 PreparedStatement 且方法名属于参数设置，则把参数按下标
+     * 存入 TreeMap 并直接返回（绑定推迟到执行时由 bind 完成字面量替换）；
+     * 其余按方法名分发，未支持的方法抛 SQLFeatureNotSupportedException。
+     *
+     * @param object 代理对象本身
+     * @param method 被调用的接口方法
+     * @param args   调用参数，可能为 null
+     * @return 方法的返回值
+     * @throws Throwable 透传 SQLException 或不支持异常
+     */
     @Override
     public Object invoke(Object object, Method method, Object[] args) throws Throwable {
       if (isObjectMethod(method)) return objectMethod(object, method, args, "CSUDB " + (preparedSql == null ? "Statement" : "PreparedStatement"));
@@ -236,12 +295,33 @@ final class JdbcProxies {
       };
     }
 
+    /**
+     * 求出本次要执行的 SQL。
+     *
+     * <p>原理：PreparedStatement 走 bind 把占位符替换成字面量；普通 Statement 取
+     * 第一个 String 参数，缺失时抛 SQLState 42000。
+     *
+     * @param args 方法参数
+     * @return 已绑定的完整 SQL
+     * @throws SQLException 未提供 SQL 文本
+     */
     private String resolveSql(Object[] args) throws SQLException {
       if (preparedSql != null) return bind(preparedSql, parameters);
       if (args == null || args.length == 0 || !(args[0] instanceof String sql)) throw new SQLException("SQL is required", "42000");
       return sql;
     }
 
+    /**
+     * 真正执行一条 SQL 并把结果物化到本 handler。
+     *
+     * <p>原理：请求服务端后，若响应含列则构造 ResultSet 并令 updateCount=-1、返回 true；
+     * 否则视为更新语句，从 affected_rows 取影响行数、清空结果集并返回 false。
+     * maxRows 大于 0 时在本地截断行数。
+     *
+     * @param sql 已绑定的 SQL
+     * @return 是否产生了结果集
+     * @throws SQLException 语句已关闭或服务端执行失败
+     */
     private boolean execute(String sql) throws SQLException {
       if (closed) throw new SQLException("statement is closed", "07000");
       Map<String, Object> response = connection.client.query(sql);
@@ -259,6 +339,16 @@ final class JdbcProxies {
       return false;
     }
 
+    /**
+     * 逐条执行批处理。
+     *
+     * <p>原理：服务端没有批量接口，因此顺序执行每条 SQL，逐条记录影响行数；
+     * 执行完清空批次。large 为 true 返回 long[]，否则收窄为 int[]（溢出即抛异常）。
+     *
+     * @param large 是否返回 long[] 版本
+     * @return 每条语句的影响行数数组，负数归零
+     * @throws SQLException 任一语句执行失败
+     */
     private Object executeBatch(boolean large) throws SQLException {
       long[] counts = new long[batch.size()];
       for (int i = 0; i < batch.size(); i++) {
@@ -292,12 +382,31 @@ final class JdbcProxies {
     private boolean closed;
     private boolean wasNull;
 
+    /**
+     * 结果集在构造时就已把全部行物化进内存，position 初始为 -1（第一行之前）。
+     *
+     * @param columns   列元数据列表
+     * @param rows      已物化的数据行
+     * @param statement 产生本结果集的语句，用于 getStatement
+     */
     ResultSetHandler(List<Map<String, Object>> columns, List<List<Object>> rows, Statement statement) {
       this.columns = columns;
       this.rows = rows;
       this.statement = statement;
     }
 
+    /**
+     * ResultSet 代理的统一入口。
+     *
+     * <p>实现原理：游标只是 rows 列表上的一个下标 position，next/previous/absolute
+     * 等只移动下标不访问网络；取值方法统一走 value() 并按类型做字符串到数值的解析。
+     *
+     * @param object 代理对象本身
+     * @param method 被调用的接口方法
+     * @param args   调用参数，可能为 null
+     * @return 方法的返回值
+     * @throws Throwable 透传 SQLException 或不支持异常
+     */
     @Override
     public Object invoke(Object object, Method method, Object[] args) throws Throwable {
       if (isObjectMethod(method)) return objectMethod(object, method, args, "CSUDB ResultSet[rows=" + rows.size() + "]");

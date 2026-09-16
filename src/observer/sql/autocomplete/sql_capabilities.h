@@ -14,11 +14,16 @@ See the Mulan PSL v2 for more details. */
 #include <unordered_set>
 
 /**
- * @brief 运行时 SQL 能力表
+ * @file sql_capabilities.h
+ * @brief 运行时 SQL 能力表（方言门禁）
  * @ingroup SQLAutocomplete
  *
- * 只描述“当前 Parser/Executor 真实支持”的 SQL 子集。
- * 补全器与模型输出校验都以它为唯一依据，避免补全/模型扩展出项目未实现的方言。
+ * 本文件是补全模块的「方言真值源」：只描述“当前 Parser/Executor 真实支持”的 SQL 子集。
+ * Grammar 补全会按它过滤候选，模型输出校验也会用它做禁用关键字白名单截断，
+ * 从而避免补全或模型扩展出项目尚未实现的方言。
+ *
+ * 核心原则：能力集合必须与 sql/parser/yacc_sql.y 中的真实 terminal 保持一致；
+ * 能力表只做只读查询，进程内以单例复用。
  */
 struct SqlCapabilities
 {
@@ -42,12 +47,40 @@ struct SqlCapabilities
   std::unordered_set<std::string> operators;  ///< 已支持运算符
   std::unordered_set<std::string> types;      ///< 已支持数据类型
 
+  /**
+   * @brief 获取进程内唯一的能力表实例
+   * @return 能力表常量引用
+   * @details 实现原理：函数内静态局部变量（C++11 起线程安全初始化）首次调用时构建一次，之后复用。
+   */
   static const SqlCapabilities &instance();
 
+  /**
+   * @brief 查询关键字是否受支持
+   * @param upper_word 全大写关键字（调用方负责转大写）
+   * @return true 表示在 keywords 集合中
+   */
   bool is_keyword(const std::string &upper_word) const;
+
+  /**
+   * @brief 查询运算符是否受支持
+   * @param symbol 运算符字面量
+   * @return true 表示在 operators 集合中
+   */
   bool is_operator(const std::string &symbol) const;
+
+  /**
+   * @brief 查询数据类型是否受支持
+   * @param upper_word 全大写类型名（调用方负责转大写）
+   * @return true 表示在 types 集合中
+   */
   bool is_type(const std::string &upper_word) const;
 
-  /// 关键字/类型是否被禁止（模型输出过滤用）
+  /**
+   * @brief 关键字/类型是否被禁止（模型输出过滤用）
+   * @param upper_word 全大写单词
+   * @return true 表示属于明确不支持的方言（如 HAVING/LIMIT/DISTINCT）
+   * @details 与 is_keyword 不同，这里维护的是黑名单：即使某个单词在语法里可能作为
+   *          普通标识符出现，只要它代表本项目未实现的语法能力，也应禁止模型推荐。
+   */
   bool is_forbidden(const std::string &upper_word) const;
 };

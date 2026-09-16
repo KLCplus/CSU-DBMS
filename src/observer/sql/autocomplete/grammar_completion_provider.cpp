@@ -14,16 +14,34 @@ See the Mulan PSL v2 for more details. */
 #include <cctype>
 #include <unordered_map>
 
+/**
+ * @file grammar_completion_provider.cpp
+ * @ingroup SQLAutocomplete
+ * @brief 基于 Parser 期望集合的语法补全实现
+ *
+ * 本文件把 bison 报告的期望 terminal 映射为候选，并叠加 Parser 试探确认的续写关键字。
+ * 核心原则：不维护第二套语法；合法性由同一个 Parser 判定，本文件只做映射与过滤。
+ */
+
 namespace {
 
+/**
+ * @brief 面向用户展示的候选描述
+ */
 struct DisplayToken
 {
-  std::string    text;
-  CompletionKind kind;
+  std::string    text;          ///< 用户可见文本（如 "SELECT"、"("）
+  CompletionKind kind;          ///< 候选种类
   bool           keyword_like;  ///< 需要跟随大小写风格
 };
 
-// bison 内部 terminal 名 -> 面向用户的文本
+/**
+ * @brief 获取 bison 内部 terminal 名到用户可见文本的映射表
+ * @return 静态映射表引用
+ * @details 实现原理：首次调用时构建一个静态 unordered_map，键为 bison 内部符号名
+ *          （如 NULL_T、INT_T、STRING_T、LBRACE），值为 DisplayToken；
+ *          之后的调用直接返回该表，避免重复构建。
+ */
 const std::unordered_map<std::string, DisplayToken> &display_table()
 {
   static const std::unordered_map<std::string, DisplayToken> table = {
@@ -89,6 +107,12 @@ const std::unordered_map<std::string, DisplayToken> &display_table()
   return table;
 }
 
+/**
+ * @brief 将字符串逐字节转大写（ASCII）
+ * @param text 输入字符串
+ * @return 转换后的副本
+ * @details 实现原理：复制后遍历每个 char，用 std::toupper（先转 unsigned char）转换。
+ */
 std::string to_upper(const std::string &text)
 {
   std::string result = text;
@@ -98,6 +122,12 @@ std::string to_upper(const std::string &text)
   return result;
 }
 
+/**
+ * @brief 将字符串逐字节转小写（ASCII）
+ * @param text 输入字符串
+ * @return 转换后的副本
+ * @details 实现原理：复制后遍历每个 char，用 std::tolower（先转 unsigned char）转换。
+ */
 std::string to_lower(const std::string &text)
 {
   std::string result = text;
@@ -107,6 +137,15 @@ std::string to_lower(const std::string &text)
   return result;
 }
 
+/**
+ * @brief 判断 candidate 是否以 partial 为前缀
+ * @param candidate 候选完整文本
+ * @param partial 用户已输入前缀
+ * @param case_insensitive true 时忽略大小写比较
+ * @return true 表示候选匹配当前前缀
+ * @details 实现原理：partial 比 candidate 长时直接返回 false；
+ *          忽略大小写时先各自 to_lower 再比较前 partial.size() 个字符，否则直接比较。
+ */
 bool prefix_match(const std::string &candidate, const std::string &partial, bool case_insensitive)
 {
   if (partial.size() > candidate.size()) {
@@ -120,12 +159,26 @@ bool prefix_match(const std::string &candidate, const std::string &partial, bool
 
 }  // namespace
 
+/**
+ * @brief 依据期望集合与试探关键字生成语法候选
+ * @param context 语法补全上下文（期望符号、试探关键字、前缀、大小写风格、替换区间）
+ * @param out 输出参数；候选追加到该 vector 末尾
+ * @return 无
+ * @details 实现原理：
+ *          1. 遍历 bison 期望符号，经 display_table 映射为用户文本，无法映射的符号直接跳过；
+ *          2. 对 Keyword/Type 做 capability 过滤（禁用词、类型白名单、关键字白名单，NULL 例外）；
+ *          3. 对非运算符做大小写不敏感前缀匹配（运算符按原样匹配）；
+ *          4. 关键字/类型按 prefer_lower 决定大小写，运算符不转换；
+ *          5. 用 seen 去重后生成 score=10.0 的 Grammar 候选；
+ *          6. 追加 extra_keywords（Parser 试探确认），过滤规则同上，score=12.0 以优先展示。
+ */
 void complete_grammar(const GrammarCompletionContext &context, std::vector<CompletionItem> &out)
 {
   const SqlCapabilities &caps = SqlCapabilities::instance();
   const auto            &table = display_table();
 
   std::vector<std::string> seen;
+  // 期望符号是 bison 在光标处报告的全部合法 terminal，逐个映射并过滤
   for (const std::string &symbol : context.expected_symbols) {
     auto iter = table.find(symbol);
     if (iter == table.end()) {
@@ -142,12 +195,13 @@ void complete_grammar(const GrammarCompletionContext &context, std::vector<Compl
       if (token.kind == CompletionKind::Type && !caps.is_type(upper_text)) {
         continue;
       }
+      // NULL 特殊：display 名为 NULL，但不在关键字集合中，需单独放行
       if (token.kind == CompletionKind::Keyword && !caps.is_keyword(upper_text) && upper_text != "NULL") {
         continue;
       }
     }
 
-    // 前缀过滤
+    // 前缀过滤（关键字/类型忽略大小写，运算符精确匹配）
     if (!context.partial.empty() && !prefix_match(token.text, context.partial, token.kind != CompletionKind::Operator)) {
       continue;
     }

@@ -18,6 +18,25 @@ See the Mulan PSL v2 for more details. */
 #include "storage/table/table.h"
 #include "storage/table/table_meta.h"
 
+/**
+ * @file model_context_builder.cpp
+ * @ingroup SQLAutocomplete
+ * @brief 模型上下文（dialect + schema）构造实现
+ *
+ * 本文件把项目真实支持的能力与真实表结构渲染为文本，随 /infill 请求注入模型。
+ * 核心原则：只提供事实（能力表 + Catalog），不编造语法或表；数量受配置上限约束。
+ */
+
+/**
+ * @brief 将一张表的列定义追加为 CREATE TABLE 文本
+ * @param db 当前数据库；为空直接返回
+ * @param table_name 表名；不存在直接返回
+ * @param out 输出流
+ * @return 无
+ * @details 实现原理：通过 db 找到表与 TableMeta，输出 `CREATE TABLE 表(`，
+ *          从 sys_field_num 开始遍历用户列，用逗号分隔列出 `列名 类型`（类型经
+ *          attr_type_to_sql_string 转换），最后以 `);\n` 收尾。跳过系统列。
+ */
 void append_table_schema(Db *db, const std::string &table_name, std::ostringstream &out)
 {
   if (db == nullptr) {
@@ -41,6 +60,18 @@ void append_table_schema(Db *db, const std::string &table_name, std::ostringstre
   out << ");\n";
 }
 
+/**
+ * @brief 构造模型上下文
+ * @param context 补全上下文（提供 Db 与作用域表）
+ * @param config 配置（max_schema_tables 限制注入表数）
+ * @return 包含 dialect 与 schema 两段文本的 ModelContext
+ * @details 实现原理：
+ *          1. dialect 按能力表逐项拼接：基础语句、可选 UPDATE/JOIN/GROUP BY/ORDER BY、
+ *             布尔运算与类型清单，并附「仅使用上述语法」的提示；
+ *          2. schema 选择：先取作用域内表（受 max_schema_tables 限制），
+ *             不足时用 Catalog 中未选过的表补齐，仍受上限；
+ *          3. 对选中的每张表调用 append_table_schema 渲染，拼接为 result.schema。
+ */
 ModelContext SqlModelContextBuilder::build(const CompletionContext &context, const SqlCompletionConfig &config) const
 {
   ModelContext result;

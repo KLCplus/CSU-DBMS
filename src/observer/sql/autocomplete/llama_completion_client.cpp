@@ -25,14 +25,37 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "json/json.h"
 
+/**
+ * @file llama_completion_client.cpp
+ * @ingroup SQLAutocomplete
+ * @brief llama.cpp /infill HTTP 客户端的实现
+ *
+ * 本文件用裸 socket + poll 实现极简 HTTP，避免引入额外依赖，并保证所有失败路径
+ * 都返回空而不是异常。核心原则：模型服务不可用时快速失败，绝不阻塞 SQL 主流程。
+ */
+
 namespace {
 
+/**
+ * @brief 取当前单调时钟毫秒数
+ * @return 自 steady_clock 纪元起的毫秒数
+ * @details 实现原理：用 steady_clock（不受系统时间调整影响）取 now 并转换为毫秒。
+ */
 int64_t now_ms()
 {
   return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch())
       .count();
 }
 
+/**
+ * @brief 从基础 URL 解析 host 与 port
+ * @param url 形如 HTTP 的 host:port[/path] 地址
+ * @param host 输出参数：主机名
+ * @param port 输出参数：端口；未显式给出时默认 80
+ * @return true 表示解析出非空 host 且 port > 0
+ * @details 实现原理：先剥离可选的 HTTP 协议前缀，再截断到第一个 '/' 之前；
+ *          用 rfind(':') 分离 host 与 port（无冒号则默认 80），atoi 解析端口。
+ */
 bool parse_base_url(const std::string &url, std::string &host, int &port)
 {
   std::string trimmed = url;
@@ -57,15 +80,29 @@ bool parse_base_url(const std::string &url, std::string &host, int &port)
 
 }  // namespace
 
+/**
+ * @brief 构造客户端
+ * @param base_url 形如 host:port 的基础地址（可带 HTTP 前缀）
+ * @param timeout_ms 连接与读写超时（毫秒）
+ * @details 实现原理：移动保存 base_url 与 timeout，并调用 parse_base_url 填充 host_/port_。
+ */
 LlamaCompletionClient::LlamaCompletionClient(std::string base_url, int timeout_ms)
     : base_url_(std::move(base_url)), timeout_ms_(timeout_ms)
 {
   parse_base_url(base_url_, host_, port_);
 }
 
+/**
+ * @brief 健康检查（带 TTL 缓存）
+ * @return true 表示服务可达
+ * @details 实现原理：2 秒内检测过则直接返回缓存；否则用 getaddrinfo 解析地址，
+ *          对每个候选地址做非阻塞 connect + poll(timeout_ms_)；连接成功后再发送
+ *          `GET /health`，整个请求写满即判定健康。结果写入上次检查时间与结果缓存。
+ */
 bool LlamaCompletionClient::health()
 {
   const int64_t now = now_ms();
+  // 2000ms TTL 缓存：避免每次补全都建立 TCP 连接
   if (now - last_health_check_ms_ < 2000) {
     return last_health_ok_;
   }
@@ -127,6 +164,20 @@ bool LlamaCompletionClient::health()
   return ok;
 }
 
+/**
+ * @brief 调用 /infill 获取 FIM 补全
+ * @param request 请求参数（prefix/suffix/extra/max_tokens/temperature）
+ * @return 成功时返回 InfillResult；任何失败返回 std::nullopt
+ * @details 实现原理：
+ *          1. 先 health()，不可达直接返回空；
+ *          2. 组装 JSON：input_prefix/input_suffix、可选 input_extra 数组，
+ *             以及 n_predict/temperature/top_k=1/cache_prompt/n_cache_reuse/t_max_predict_ms；
+ *          3. 解析地址并建立非阻塞 TCP 连接（同 health）；
+ *          4. 循环 poll 写超时内发送完整 POST /infill 请求；
+ *          5. 循环 recv 读取响应，poll 超时或出错即停止；
+ *          6. 解析 HTTP 头：必须有 "\r\n\r\n" 且状态为 200；
+ *          7. 解析 JSON body 取 content，非空则返回，否则返回空。
+ */
 std::optional<InfillResult> LlamaCompletionClient::infill(const InfillRequest &request)
 {
   if (!health()) {
@@ -256,6 +307,7 @@ std::optional<InfillResult> LlamaCompletionClient::infill(const InfillRequest &r
   }
   close(fd);
 
+  // 划分 HTTP 头与 body；仅接受状态码 200
   const size_t header_end = response.find("\r\n\r\n");
   if (header_end == std::string::npos) {
     return std::nullopt;
@@ -273,6 +325,7 @@ std::optional<InfillResult> LlamaCompletionClient::infill(const InfillRequest &r
   if (!reader->parse(payload.data(), payload.data() + payload.size(), &json, &errors)) {
     return std::nullopt;
   }
+  // llama.cpp /infill 在 "content" 字段返回补全文本
   std::string content = json.get("content", "").asString();
   if (content.empty()) {
     return std::nullopt;

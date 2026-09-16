@@ -16,8 +16,27 @@ See the Mulan PSL v2 for more details. */
 #include "common/log/log.h"
 #include "json/json.h"
 
+/**
+ * @file sql_completion_config.cpp
+ * @ingroup SQLAutocomplete
+ * @brief 补全配置的加载实现
+ *
+ * 本文件从 JSON 文件读取补全参数并覆盖默认值，找不到或解析失败时静默回退。
+ * 核心原则：逐字段按存在性覆盖，未知字段忽略；配置错误绝不导致进程失败。
+ */
+
 namespace {
 
+/**
+ * @brief 尝试从单个 JSON 文件加载配置
+ * @param path 文件路径
+ * @param config 输入输出参数；成功时用文件中的字段覆盖对应默认值
+ * @return true 表示文件存在、解析成功且为 JSON 对象
+ * @details 实现原理：打开文件失败直接返回 false；用 Json::CharReader 解析整段内容，
+ *          解析失败或根不是对象时记 WARN 并返回 false；
+ *          否则对每个已知字段用 isMember 判断存在后覆盖，返回 true。
+ *          未知字段被忽略，缺省字段保留原值。
+ */
 bool load_from_file(const std::string &path, SqlCompletionConfig &config)
 {
   std::ifstream in(path);
@@ -50,10 +69,18 @@ bool load_from_file(const std::string &path, SqlCompletionConfig &config)
 
 }  // namespace
 
+/**
+ * @brief 从环境变量或默认路径加载配置
+ * @return 加载后的配置；全部候选路径都失败时返回默认值
+ * @details 实现原理：先放入环境变量指定路径（若非空），再依次追加若干默认相对路径；
+ *          按顺序尝试 load_from_file，首个成功者记录 INFO 日志后返回；
+ *          均失败则返回默认构造 config（不报错）。
+ */
 SqlCompletionConfig SqlCompletionConfig::load()
 {
   SqlCompletionConfig config;
 
+  // 候选路径优先级：环境变量 > 工作目录 config/ > etc/ 及其上两级的 etc/
   std::vector<std::string> candidates;
   const char              *env = getenv("CSUDB_SQL_COMPLETION_CONFIG");
   if (env != nullptr && env[0] != '\0') {
