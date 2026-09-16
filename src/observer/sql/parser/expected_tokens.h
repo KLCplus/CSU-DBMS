@@ -23,9 +23,10 @@ See the Mulan PSL v2 for more details. */
  *   SQL 文本 -> Flex token -> Bison LALR -> ParsedSqlNode AST
  *   -> ParseStage -> ResolveStage -> Stmt，
  * 直接向 Bison 的 LALR 状态机询问“下一个合法 token 有哪些”。
- * 核心实现原则：不另建语法分析器，而是在输入末尾追加一个非法哨兵字符触发语法错误，
- * 再借 Bison `%define parse.error custom` 的 yypcontext_expected_tokens 取出期望集合，
- * 从而让补全与语法诊断共享同一份语法信息。
+ * 核心实现原则：不另建语法分析器，直接复用同一份 Bison 文法；由调用方（补全层）在
+ * 光标前缀末尾追加哨兵字符 '\x01' 触发语法错误，本函数再借 Bison
+ * `%define parse.error custom` 的 yypcontext_expected_tokens 取出期望集合，
+ * 从而让补全与语法诊断共享同一份语法信息。注意：本函数自身不追加哨兵。
  */
 
 #include <string>
@@ -34,9 +35,9 @@ See the Mulan PSL v2 for more details. */
 /**
  * @brief 复用现有 bison 语法分析器，返回给定 SQL 前缀在结尾处合法的 terminal 集合
  *
- * 实现方式：在输入末尾追加一个非法哨兵字符，让 Parser 在该位置产生语法错误，
- * 再通过 %define parse.error custom 的 yypcontext_expected_tokens 取出期望集合。
- * 这样自动补全与语法诊断使用同一份信息，不引入第二套 SQL parser。
+ * 实现方式：调用方需先在 sql 末尾追加哨兵字符（补全层使用 '\x01'）再调用本函数，
+ * Parser 会在该哨兵处产生语法错误，本函数通过 yypcontext_expected_tokens 收集期望集合。
+ * 本函数自身不追加哨兵；这样自动补全与语法诊断使用同一份信息，不引入第二套 SQL parser。
  *
  * @param sql     待分析的 SQL 前缀
  * @param tokens  输出：期望的 terminal 符号名（如 SELECT / FROM / ID / LBRACE）
