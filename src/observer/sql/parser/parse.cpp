@@ -1,3 +1,11 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  parse.cpp:47                   默认构造函数：把语句类型初始化为 SCF_ERROR
+//  parse.cpp:55                   以指定语句类型构造 ParsedSqlNode
+//  parse.cpp:63                   向结果集中追加一条已解析的 SQL 语句
+//  parse.cpp:81                   解析 SQL 文本的对外实现
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

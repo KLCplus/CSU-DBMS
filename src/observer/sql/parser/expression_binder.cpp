@@ -1,3 +1,25 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  expression_binder.cpp:72       把算术运算符枚举转换为可读符号
+//  expression_binder.cpp:92       生成并记录“运算符不能作用于该类型”的语义错误消息
+//  expression_binder.cpp:114      清空线程本地绑定错误消息
+//  expression_binder.cpp:120      写入线程本地绑定错误消息
+//  expression_binder.cpp:126      读取线程本地绑定错误消息
+//  expression_binder.cpp:135      按表名在查询表集合中查找表（忽略大小写）
+//  expression_binder.cpp:154      把一张表的用户字段全部展开为字段表达式
+//  expression_binder.cpp:176      绑定表达式总入口：按表达式类型分派到具体绑定函数
+//  expression_binder.cpp:240      绑定并展开星号表达式 `*` / `table.*`
+//  expression_binder.cpp:288      绑定未解析的字段表达式（如 `a` 或 `t.a`）
+//  expression_binder.cpp:356      绑定已解析的字段表达式
+//  expression_binder.cpp:370      绑定常量值表达式
+//  expression_binder.cpp:386      绑定 CAST 类型转换表达式
+//  expression_binder.cpp:428      绑定比较表达式（= <> < <= > >= 及 IS [NOT] NULL）
+//  expression_binder.cpp:487      绑定布尔连接表达式（AND / OR）
+//  expression_binder.cpp:534      绑定算术表达式（+ - * / 以及一元负号）
+//  expression_binder.cpp:609      校验聚合表达式是否合法
+//  expression_binder.cpp:664      绑定聚合表达式（SUM/AVG/COUNT/MAX/MIN）
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

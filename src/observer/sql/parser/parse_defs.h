@@ -1,3 +1,34 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  parse_defs.h:80                描述一个属性
+//  parse_defs.h:90                描述比较运算符
+//  parse_defs.h:111               表示一个条件比较
+//  parse_defs.h:141               描述一个显式 JOIN 子句
+//  parse_defs.h:147               ORDER BY 的排序方向（ASC / DESC）
+//  parse_defs.h:157               ORDER BY 的单个排序项
+//  parse_defs.h:163               描述一个 select 语句
+//  parse_defs.h:178               算术表达式计算的语法树
+//  parse_defs.h:188               描述一个insert语句
+//  parse_defs.h:199               描述一个delete语句
+//  parse_defs.h:209               描述一个update语句
+//  parse_defs.h:222               描述一个属性
+//  parse_defs.h:235               描述一个create table语句
+//  parse_defs.h:249               描述一个drop table语句
+//  parse_defs.h:258               描述一个analyze table语句
+//  parse_defs.h:269               描述一个create index语句
+//  parse_defs.h:280               描述一个drop index语句
+//  parse_defs.h:291               描述一个desc table语句
+//  parse_defs.h:301               描述一个load data语句
+//  parse_defs.h:314               设置变量的值
+//  parse_defs.h:329               描述一个explain语句
+//  parse_defs.h:339               解析SQL语句出现了错误
+//  parse_defs.h:350               表示一个SQL语句的类型
+//  parse_defs.h:380               表示一个SQL语句
+//  parse_defs.h:410               以指定命令类型构造节点
+//  parse_defs.h:417               表示语法解析后的数据
+//  parse_defs.h:425               追加一条已解析的 SQL 语句
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

@@ -1,3 +1,36 @@
+/*
+ * ------------------------------------------------------------------------------------------------
+ * 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+ * ------------------------------------------------------------------------------------------------
+ *  lex_sql.l:35                   Flex 词法分析器总览与实现原则
+ *  lex_sql.l:61                   每次 yylex 开始重置行/列号
+ *  lex_sql.l:67                   每个 token 后记录 <行,列> 位置
+ *  lex_sql.l:78                   include、宏（RETURN_TOKEN 等）
+ *  lex_sql.l:101                  返回 token 的宏
+ *  lex_sql.l:105                  no yywrap/不区分大小写/reentrant 等
+ *  lex_sql.l:116                  WHITE_SPACE/DIGIT/ID/DOT/QUOTE
+ *  lex_sql.l:124                  %x STR / %x COMMENT
+ *  lex_sql.l:133                  %% 之后是规则区
+ *  lex_sql.l:135                  空白、换行、-- 行注释、块注释
+ *  lex_sql.l:144                  NUMBER / FLOAT
+ *  lex_sql.l:148                  分号、点号与全部关键字入口
+ *  lex_sql.l:165                  SELECT/CALC/FROM/WHERE/AND/OR
+ *  lex_sql.l:172                  INSERT/INTO/VALUES/DELETE/UPDATE/SET
+ *  lex_sql.l:179                  BEGIN/COMMIT/ROLLBACK
+ *  lex_sql.l:183                  NULL/IS/NOT/INT/CHAR/FLOAT/VECTOR/DATE
+ *  lex_sql.l:192                  LOAD/DATA/INFILE
+ *  lex_sql.l:196                  EXPLAIN/GROUP/BY/ORDER/STORAGE/FORMAT/PRIMARY/KEY
+ *  lex_sql.l:205                  ANALYZE/FIELDS/TERMINATED/ENCLOSED
+ *  lex_sql.l:210                  返回 ID，strdup 登记到 yyextra
+ *  lex_sql.l:212                  LBRACE / RBRACE
+ *  lex_sql.l:216                  EQ/NE/LE/LT/GE/GT
+ *  lex_sql.l:227                  返回字符本身 + - * /
+ *  lex_sql.l:232                  单/双引号返回 SSS，登记到 yyextra
+ *  lex_sql.l:236                  未识别字符记日志并原样返回
+ *  lex_sql.l:247                  把待解析字符串设为扫描器输入缓冲区
+ * ------------------------------------------------------------------------------------------------
+ */
+
 %top{
 /**
  * @file lex_sql.l

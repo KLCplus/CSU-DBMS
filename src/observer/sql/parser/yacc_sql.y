@@ -1,3 +1,74 @@
+/*
+ * ------------------------------------------------------------------------------------------------
+ * 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+ * ------------------------------------------------------------------------------------------------
+ *  yacc_sql.y:114                 依据位置区间从原始 SQL 文本中截取对应的词素文本
+ *  yacc_sql.y:132                 传统 yyerror 入口：生成带行列定位的语法错误节点
+ *  yacc_sql.y:200                 构造一个未绑定的算术表达式节点
+ *  yacc_sql.y:224                 构造一个未绑定的聚合表达式节点
+ *  yacc_sql.y:245                 为表达式同时记录显示名与 <行,列> 位置
+ *  yacc_sql.y:265                 将带引号的字符串常量还原为原始内容并处理转义
+ *  yacc_sql.y:298                 向 JOIN 子句列表追加一个 JOIN 节点
+ *  yacc_sql.y:521                 顶层输入：0 或多条命令
+ *  yacc_sql.y:533                 单条命令的分发包装
+ *  yacc_sql.y:558                 EXIT 语句
+ *  yacc_sql.y:565                 HELP 语句
+ *  yacc_sql.y:571                 SYNC 语句
+ *  yacc_sql.y:578                 BEGIN 事务开始
+ *  yacc_sql.y:585                 COMMIT 事务提交
+ *  yacc_sql.y:592                 ROLLBACK 事务回滚
+ *  yacc_sql.y:599                 drop table 语句的语法解析树
+ *  yacc_sql.y:606                 analyze table 语法的语法解析树
+ *  yacc_sql.y:614                 SHOW TABLES
+ *  yacc_sql.y:621                 DESC 查看表结构
+ *  yacc_sql.y:632                 create index 语句的语法解析树
+ *  yacc_sql.y:644                 drop index 语句的语法解析树
+ *  yacc_sql.y:657                 create table 语句的语法解析树
+ *  yacc_sql.y:679                 列定义列表
+ *  yacc_sql.y:698                 单个列定义
+ *  yacc_sql.y:717                 NULL / NOT NULL
+ *  yacc_sql.y:732                 列长度等整数字面量
+ *  yacc_sql.y:736                 列类型
+ *  yacc_sql.y:744                 主键定义
+ *  yacc_sql.y:756                 列名列表
+ *  yacc_sql.y:778                 insert 语句的语法解析树
+ *  yacc_sql.y:798                 VALUES 值列表
+ *  yacc_sql.y:815                 单个值
+ *  yacc_sql.y:836                 建表存储格式子句
+ *  yacc_sql.y:848                 delete 语句的语法解析树
+ *  yacc_sql.y:864                 update 语句的语法解析树
+ *  yacc_sql.y:884                 select 语句的语法解析树
+ *  yacc_sql.y:919                 CALC 计算语句
+ *  yacc_sql.y:929                 表达式列表
+ *  yacc_sql.y:950                 表达式（比较/算术/聚合/字面量）
+ *  yacc_sql.y:988                 聚合表达式
+ *  yacc_sql.y:995                 字段（可带表名限定）
+ *  yacc_sql.y:1008                表引用
+ *  yacc_sql.y:1014                表列表
+ *  yacc_sql.y:1035                显式 JOIN 子句
+ *  yacc_sql.y:1054                WHERE 子句
+ *  yacc_sql.y:1065                SELECT ... WHERE 子句
+ *  yacc_sql.y:1081                布尔表达式（AND / OR）
+ *  yacc_sql.y:1112                比较谓词
+ *  yacc_sql.y:1127                条件列表
+ *  yacc_sql.y:1147                单个条件
+ *  yacc_sql.y:1199                比较运算符
+ *  yacc_sql.y:1210                GROUP BY 子句
+ *  yacc_sql.y:1223                ORDER BY 子句
+ *  yacc_sql.y:1236                单个排序项
+ *  yacc_sql.y:1258                排序项列表
+ *  yacc_sql.y:1277                LOAD DATA 数据导入
+ *  yacc_sql.y:1300                FIELDS TERMINATED BY 子句
+ *  yacc_sql.y:1311                ENCLOSED BY 子句
+ *  yacc_sql.y:1325                EXPLAIN 语句
+ *  yacc_sql.y:1334                SET 变量语句
+ *  yacc_sql.y:1345                可选的结尾分号
+ *  yacc_sql.y:1393                %define parse.error custom 指定的语法错误回调
+ *  yacc_sql.y:1484                驱动一次完整的词法+语法分析
+ *  yacc_sql.y:1513                收集给定 SQL 前缀末尾处合法的终结符集合（用于自动补全）
+ * ------------------------------------------------------------------------------------------------
+ */
+
 
 /**
  * @file yacc_sql.y

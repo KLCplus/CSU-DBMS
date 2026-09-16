@@ -1,3 +1,9 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  resolve_stage.h:44             执行Resolve，将解析后的SQL语句，转换成各种Stmt(Statement), 同时会做错误检查
+//  resolve_stage.h:55             处理一次语义解析请求
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

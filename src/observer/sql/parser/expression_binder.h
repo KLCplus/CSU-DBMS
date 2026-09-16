@@ -1,3 +1,25 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  expression_binder.h:59         表达式绑定上下文：提供查询涉及的物理表集合
+//  expression_binder.h:65         虚析构（默认实现），保证可作为多态基类安全使用
+//  expression_binder.h:81         按表名查找查询涉及的表（大小写不敏感）
+//  expression_binder.h:99         绑定表达式
+//  expression_binder.h:108        虚析构（默认实现），便于将来扩展为多态绑定器
+//  expression_binder.h:118        绑定一个表达式（递归入口/分派器）
+//  expression_binder.h:129        绑定星号表达式（SELECT * / SELECT t.*）
+//  expression_binder.h:137        绑定未解析字段表达式（字段名在语法阶段尚未与具体表关联）
+//  expression_binder.h:146        绑定已解析字段表达式
+//  expression_binder.h:154        绑定值表达式（常量）
+//  expression_binder.h:162        绑定 CAST 类型转换表达式
+//  expression_binder.h:170        绑定比较表达式
+//  expression_binder.h:179        绑定布尔连接表达式（AND / OR）
+//  expression_binder.h:189        绑定算术表达式（+ - * / 及一元负号）
+//  expression_binder.h:198        绑定聚合表达式（SUM/AVG/COUNT/MAX/MIN）
+//  expression_binder.h:217        清空线程本地的绑定错误消息
+//  expression_binder.h:223        写入线程本地的绑定错误消息
+//  expression_binder.h:229        读取线程本地的绑定错误消息
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
