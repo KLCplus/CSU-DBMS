@@ -2,20 +2,6 @@
 // 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
 // ------------------------------------------------------------------------------------------------
 //  parse_stage.cpp:59             处理一次解析请求：SQL 文本 -> ParsedSqlNode，并写入事件
-// ------------------------------------------------------------------------------------------------
-/* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
-miniob is licensed under Mulan PSL v2.
-You can use this software according to the terms and conditions of the Mulan PSL v2.
-You may obtain a copy of Mulan PSL v2 at:
-         http://license.coscl.org.cn/MulanPSL2
-THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
-EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
-MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
-See the Mulan PSL v2 for more details. */
-
-//
-// Created by Longda on 2021/4/13.
-//
 
 /**
  * @file parse_stage.cpp
