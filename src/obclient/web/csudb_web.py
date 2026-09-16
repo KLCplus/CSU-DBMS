@@ -1,4 +1,32 @@
 #!/usr/bin/env python3
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  csudb_web.py:67            SessionStore
+#  csudb_web.py:68            __init__
+#  csudb_web.py:74            create
+#  csudb_web.py:81            get
+#  csudb_web.py:86            remove
+#  csudb_web.py:93            close_all
+#  csudb_web.py:103           WebConsoleServer
+#  csudb_web.py:109           __init__
+#  csudb_web.py:118           public_result
+#  csudb_web.py:134           Handler
+#  csudb_web.py:139           log_message
+#  csudb_web.py:146           _security_headers
+#  csudb_web.py:164           do_OPTIONS
+#  csudb_web.py:170           _send_json
+#  csudb_web.py:182           _send_file
+#  csudb_web.py:196           _read_json
+#  csudb_web.py:210           _session_token
+#  csudb_web.py:219           _connection
+#  csudb_web.py:223           _require_connection
+#  csudb_web.py:231           do_GET
+#  csudb_web.py:296           do_POST
+#  csudb_web.py:368           parse_arguments
+#  csudb_web.py:380           main
+#  csudb_web.py:398           shutdown
+# ------------------------------------------------------------------------------------------------
 """Local-only HTTP gateway for the CSUDB 2026 Web Console."""
 
 from __future__ import annotations

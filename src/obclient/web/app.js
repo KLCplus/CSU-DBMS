@@ -1,3 +1,31 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  app.js:41                  api
+//  app.js:43                  post
+//  app.js:45                  text
+//  app.js:46                  num
+//  app.js:48                  table
+//  app.js:50                  showPage
+//  app.js:52                  renderLineChart
+//  app.js:54                  renderStatus
+//  app.js:56                  databases
+//  app.js:58                  tables
+//  app.js:60                  schemaGraph
+//  app.js:62                  loadTable
+//  app.js:64                  loadStructure
+//  app.js:66                  loadIndexes
+//  app.js:68                  run
+//  app.js:70                  recent
+//  app.js:72                  refresh
+//  app.js:77                  acHide
+//  app.js:78                  acRender
+//  app.js:79                  acAccept
+//  app.js:80                  acAcceptGhost
+//  app.js:81                  acShowGhost
+//  app.js:82                  acRequest
+//  app.js:83                  acMove
+// ------------------------------------------------------------------------------------------------
 /*
  * @file app.js
  * @brief CSUDB Web Console 前端脚本（单文件、无构建依赖）

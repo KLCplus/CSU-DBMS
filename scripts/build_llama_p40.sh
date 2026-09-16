@@ -1,4 +1,18 @@
 #!/usr/bin/env bash
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  build_llama_p40.sh:31      LLAMA_DIR
+#  build_llama_p40.sh:32      CUDA_ARCH
+#  build_llama_p40.sh:34      环境检查
+#  build_llama_p40.sh:45      CUDA_HOME_CANDIDATE
+#  build_llama_p40.sh:61      NVCC
+#  build_llama_p40.sh:62      CUDA_VER
+#  build_llama_p40.sh:77      克隆 llama.cpp 到 ${LLAMA_DIR}
+#  build_llama_p40.sh:84      配置 (CUDA_ARCHITECTURES=${CUDA_ARCH}, GGML_CUDA_FORCE_MMQ=ON)
+#  build_llama_p40.sh:96      编译 llama-server
+#  build_llama_p40.sh:100     验收
+# ------------------------------------------------------------------------------------------------
 # 在 NVIDIA Tesla P40 (Pascal / compute capability 6.1) 上构建 llama.cpp。
 # 关键点：P40 是 sm_61，CUDA 13.x 已不再支持 Pascal，必须使用 CUDA 12.x。
 # 默认开启 CUDA MMQ（P40 无 Tensor Core，MMQ 是主要路径）。

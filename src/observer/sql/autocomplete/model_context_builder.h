@@ -1,3 +1,10 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  model_context_builder.h:39 ModelContext
+//  model_context_builder.h:45 SqlModelContextBuilder
+//  model_context_builder.h:57 build
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

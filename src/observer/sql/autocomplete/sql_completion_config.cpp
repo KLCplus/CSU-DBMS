@@ -1,3 +1,9 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  sql_completion_config.cpp:46 load_from_file
+//  sql_completion_config.cpp:85 load
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

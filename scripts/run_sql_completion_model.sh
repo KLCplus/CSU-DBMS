@@ -1,4 +1,16 @@
 #!/usr/bin/env bash
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  run_sql_completion_model.sh:32 LLAMA_SERVER
+#  run_sql_completion_model.sh:33 HOST
+#  run_sql_completion_model.sh:34 PORT
+#  run_sql_completion_model.sh:35 CTX
+#  run_sql_completion_model.sh:36 MODEL_REPO
+#  run_sql_completion_model.sh:37 MODEL_FILE
+#  run_sql_completion_model.sh:60 exec llama-server
+#  run_sql_completion_model.sh:66 exec llama-server
+# ------------------------------------------------------------------------------------------------
 # 启动 SQL 补全模型 sidecar：Qwen2.5-Coder-1.5B (GGUF Q8_0) + llama.cpp /infill。
 # 仅监听 127.0.0.1，避免把本地 SQL/schema 暴露到公网。
 #

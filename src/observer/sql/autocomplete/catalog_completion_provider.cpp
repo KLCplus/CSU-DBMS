@@ -1,3 +1,17 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  catalog_completion_provider.cpp:54 upper
+//  catalog_completion_provider.cpp:70 starts_with_ci
+//  catalog_completion_provider.cpp:85 has_symbol
+//  catalog_completion_provider.cpp:91 CursorContext
+//  catalog_completion_provider.cpp:103 ResolvedContext
+//  catalog_completion_provider.cpp:124 resolve_context
+//  catalog_completion_provider.cpp:259 add_item
+//  catalog_completion_provider.cpp:289 complete_tables
+//  catalog_completion_provider.cpp:319 complete_columns_of
+//  catalog_completion_provider.cpp:364 complete_catalog
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

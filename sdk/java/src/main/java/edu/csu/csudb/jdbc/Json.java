@@ -1,3 +1,22 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  Json.java:35               Json
+//  Json.java:37               Json
+//  Json.java:40               stringify
+//  Json.java:51               parseObject
+//  Json.java:67               write
+//  Json.java:132              parse
+//  Json.java:144              value
+//  Json.java:163              object
+//  Json.java:186              array
+//  Json.java:204              string
+//  Json.java:243              number
+//  Json.java:261              literal
+//  Json.java:268              consume
+//  Json.java:277              whitespace
+//  Json.java:286              fail
+// ------------------------------------------------------------------------------------------------
 package edu.csu.csudb.jdbc;
 
 import java.sql.SQLException;

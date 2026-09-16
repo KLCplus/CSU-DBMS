@@ -1,3 +1,14 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  completion_types.h:44      CompletionKind
+//  completion_types.h:60      CompletionSource
+//  completion_types.h:74      completion_kind_name
+//  completion_types.h:82      completion_source_name
+//  completion_types.h:89      CompletionItem
+//  completion_types.h:107     CompletionRequest
+//  completion_types.h:120     CompletionResponse
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

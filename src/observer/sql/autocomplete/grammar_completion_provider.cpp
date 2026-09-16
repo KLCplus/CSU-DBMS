@@ -1,3 +1,13 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  grammar_completion_provider.cpp:41 DisplayToken
+//  grammar_completion_provider.cpp:55 display_table
+//  grammar_completion_provider.cpp:126 to_upper
+//  grammar_completion_provider.cpp:141 to_lower
+//  grammar_completion_provider.cpp:159 prefix_match
+//  grammar_completion_provider.cpp:185 complete_grammar
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

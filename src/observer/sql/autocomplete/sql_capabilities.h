@@ -1,3 +1,13 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  sql_capabilities.h:38      SqlCapabilities
+//  sql_capabilities.h:65      instance
+//  sql_capabilities.h:72      is_keyword
+//  sql_capabilities.h:79      is_operator
+//  sql_capabilities.h:86      is_type
+//  sql_capabilities.h:95      is_forbidden
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

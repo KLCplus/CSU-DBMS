@@ -1,3 +1,14 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  model_completion_validator.cpp:54 to_upper
+//  model_completion_validator.cpp:69 trim
+//  model_completion_validator.cpp:92 clean
+//  model_completion_validator.cpp:152 prefix_is_valid
+//  model_completion_validator.cpp:183 catalog_identifiers_valid
+//  model_completion_validator.cpp:214 longest_valid_prefix
+//  model_completion_validator.cpp:250 validate
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

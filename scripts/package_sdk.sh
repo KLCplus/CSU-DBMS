@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  package_sdk.sh:31          TOPDIR
+#  package_sdk.sh:35          VER
+#  package_sdk.sh:36          PY_NAME
+#  package_sdk.sh:37          JDBC_JAR
+#  package_sdk.sh:39          Python SDK
+#  package_sdk.sh:48          Java JDBC
+#  package_sdk.sh:57          校验
+# ------------------------------------------------------------------------------------------------
 # 打包 CSUDB SDK（Python 驱动 + Java JDBC 驱动）供外部项目使用。
 # 产物：dist/csudb-python-sdk-<ver>.tar.gz、dist/csudb-jdbc-<ver>.jar、dist/SDK-README.md、dist/SDK-sha256.txt
 #

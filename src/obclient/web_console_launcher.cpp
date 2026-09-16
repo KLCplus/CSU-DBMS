@@ -1,3 +1,21 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  web_console_launcher.cpp:51 home_directory
+//  web_console_launcher.cpp:62 state_directory
+//  web_console_launcher.cpp:72 pid_path
+//  web_console_launcher.cpp:82 log_path
+//  web_console_launcher.cpp:93 read_pid
+//  web_console_launcher.cpp:109 is_web_process
+//  web_console_launcher.cpp:124 executable_path
+//  web_console_launcher.cpp:139 find_web_script
+//  web_console_launcher.cpp:161 remove_stale_pid_file
+//  web_console_launcher.cpp:174 ensure_state_directory
+//  web_console_launcher.cpp:193 open_browser
+//  web_console_launcher.cpp:215 web_console_status
+//  web_console_launcher.cpp:238 start_web_console
+//  web_console_launcher.cpp:318 stop_web_console
+// ------------------------------------------------------------------------------------------------
 /**
  * @file web_console_launcher.cpp
  * @brief 从 CLI 启动与停止本地 Web 控制台进程

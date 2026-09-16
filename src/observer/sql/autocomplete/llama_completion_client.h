@@ -1,3 +1,14 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  llama_completion_client.h:44 ExtraContextFile
+//  llama_completion_client.h:53 InfillRequest
+//  llama_completion_client.h:65 InfillResult
+//  llama_completion_client.h:71 LlamaCompletionClient
+//  llama_completion_client.h:83 LlamaCompletionClient
+//  llama_completion_client.h:92 health
+//  llama_completion_client.h:102 infill
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

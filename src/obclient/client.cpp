@@ -1,3 +1,39 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  client.cpp:97              CompletionEntry
+//  client.cpp:109             ClientOptions
+//  client.cpp:129             CliOverrides
+//  client.cpp:145             trim
+//  client.cpp:159             upper
+//  client.cpp:170             home_directory
+//  client.cpp:182             usage
+//  client.cpp:215             unquote
+//  client.cpp:232             load_toml
+//  client.cpp:258             apply_section
+//  client.cpp:274             apply_environment
+//  client.cpp:294             apply_url
+//  client.cpp:341             parse_options
+//  client.cpp:415             read_password
+//  client.cpp:452             NativeConnection
+//  client.cpp:569             render_table
+//  client.cpp:634             complete_sql
+//  client.cpp:656             split_sql_script
+//  client.cpp:679             sensitive_sql
+//  client.cpp:693             print_client_logo
+//  client.cpp:724             banner
+//  client.cpp:778             meta_command_names
+//  client.cpp:794             edit_distance
+//  client.cpp:817             is_subsequence
+//  client.cpp:832             normalized_meta_command
+//  client.cpp:847             matching_meta_commands
+//  client.cpp:878             complete_meta_command
+//  client.cpp:895             hint_meta_command
+//  client.cpp:916             Shell
+//  client.cpp:1384            complete_dispatch
+//  client.cpp:1399            hint_dispatch
+//  client.cpp:1414            main
+// ------------------------------------------------------------------------------------------------
 /**
  * @file client.cpp
  * @brief CSUDB 原生协议交互式命令行客户端（csudb）

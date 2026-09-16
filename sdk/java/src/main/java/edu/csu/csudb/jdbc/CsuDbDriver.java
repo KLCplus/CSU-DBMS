@@ -1,3 +1,12 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  CsuDbDriver.java:38        CsuDbDriver
+//  CsuDbDriver.java:66        connect
+//  CsuDbDriver.java:105       acceptsURL
+//  CsuDbDriver.java:117       getPropertyInfo
+//  CsuDbDriver.java:145       decode
+// ------------------------------------------------------------------------------------------------
 package edu.csu.csudb.jdbc;
 
 import java.net.URI;

@@ -1,3 +1,49 @@
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  csudb.py:86                Warning
+#  csudb.py:91                Error
+#  csudb.py:96                InterfaceError
+#  csudb.py:104               DatabaseError
+#  csudb.py:105               __init__
+#  csudb.py:112               DataError
+#  csudb.py:117               OperationalError
+#  csudb.py:122               IntegrityError
+#  csudb.py:127               InternalError
+#  csudb.py:132               ProgrammingError
+#  csudb.py:137               NotSupportedError
+#  csudb.py:147               _quote
+#  csudb.py:165               _bind
+#  csudb.py:182               _NativeConnection
+#  csudb.py:187               __init__
+#  csudb.py:198               close
+#  csudb.py:212               request
+#  csudb.py:241               Connection
+#  csudb.py:254               __init__
+#  csudb.py:283               closed
+#  csudb.py:288               cursor
+#  csudb.py:295               execute
+#  csudb.py:300               commit
+#  csudb.py:305               rollback
+#  csudb.py:311               server_info
+#  csudb.py:317               buffer_snapshot
+#  csudb.py:324               _request
+#  csudb.py:336               close
+#  csudb.py:348               __enter__
+#  csudb.py:354               __exit__
+#  csudb.py:361               Cursor
+#  csudb.py:368               __init__
+#  csudb.py:383               execute
+#  csudb.py:405               executemany
+#  csudb.py:417               fetchone
+#  csudb.py:428               fetchmany
+#  csudb.py:437               fetchall
+#  csudb.py:444               close
+#  csudb.py:450               __iter__
+#  csudb.py:455               __next__
+#  csudb.py:468               _raise_for_error
+#  csudb.py:485               connect
+# ------------------------------------------------------------------------------------------------
 """CSUDB 2026 Native JSON 协议的轻量 DB-API 2.0 风格驱动。
 
 核心原理：本模块不包含 SQL 引擎，只做协议翻译——把 Python 调用编码成

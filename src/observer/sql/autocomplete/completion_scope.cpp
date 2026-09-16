@@ -1,3 +1,12 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  completion_scope.cpp:44    upper
+//  completion_scope.cpp:59    is_clause_boundary
+//  completion_scope.cpp:78    contains
+//  completion_scope.cpp:90    table_names
+//  completion_scope.cpp:113   build_completion_scope
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

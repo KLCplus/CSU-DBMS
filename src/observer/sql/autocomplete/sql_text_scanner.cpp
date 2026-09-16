@@ -1,3 +1,12 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  sql_text_scanner.cpp:42    is_word_start
+//  sql_text_scanner.cpp:50    is_word_char
+//  sql_text_scanner.cpp:58    is_space
+//  sql_text_scanner.cpp:76    scan_sql_text
+//  sql_text_scanner.cpp:229   cursor_in_string_or_comment
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

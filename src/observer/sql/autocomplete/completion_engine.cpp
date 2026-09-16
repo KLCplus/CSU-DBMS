@@ -1,3 +1,14 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  completion_engine.cpp:56   is_partial_char
+//  completion_engine.cpp:67   to_upper
+//  completion_engine.cpp:84   prefer_lowercase
+//  completion_engine.cpp:126  compute_sentinel_location
+//  completion_engine.cpp:148  prefix_is_valid
+//  completion_engine.cpp:179  sort_and_trim
+//  completion_engine.cpp:212  complete
+// ------------------------------------------------------------------------------------------------
 /* Copyright (c) 2021 OceanBase and/or its affiliates. All rights reserved.
 miniob is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.

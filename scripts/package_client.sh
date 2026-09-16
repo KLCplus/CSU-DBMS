@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+# ------------------------------------------------------------------------------------------------
+# 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+# ------------------------------------------------------------------------------------------------
+#  package_client.sh:28       TOPDIR
+#  package_client.sh:32       NAME
+#  package_client.sh:33       BUILD_DIR
+#  package_client.sh:35       配置 Release 构建（无 ASan，静态标准库）
+#  package_client.sh:43       编译 csudb 客户端
+#  package_client.sh:53       组装发布目录 dist/${NAME}
+#  package_client.sh:61       打包
+# ------------------------------------------------------------------------------------------------
 # 构建并打包 CSUDB Linux 命令行客户端（Release，静态 libstdc++/libgcc，仅依赖 libc/libm）。
 # 产物：dist/csudb-client-linux-x64.tar.gz 及其 .sha256
 #

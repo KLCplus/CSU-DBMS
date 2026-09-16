@@ -1,3 +1,15 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  NativeClient.java:35       NativeClient
+//  NativeClient.java:76       query
+//  NativeClient.java:84       ping
+//  NativeClient.java:94       isClosed
+//  NativeClient.java:100      close
+//  NativeClient.java:114      request
+//  NativeClient.java:141      checked
+//  NativeClient.java:151      closeSocket
+// ------------------------------------------------------------------------------------------------
 package edu.csu.csudb.jdbc;
 
 import java.io.ByteArrayOutputStream;

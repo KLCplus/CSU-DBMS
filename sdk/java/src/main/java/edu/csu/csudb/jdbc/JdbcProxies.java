@@ -1,3 +1,45 @@
+// ------------------------------------------------------------------------------------------------
+// 本文件功能索引（VSCode / Cursor：Ctrl+Click `文件:行号` 跳转）
+// ------------------------------------------------------------------------------------------------
+//  JdbcProxies.java:81        JdbcProxies
+//  JdbcProxies.java:82        JdbcProxies
+//  JdbcProxies.java:85        connection
+//  JdbcProxies.java:94        proxy
+//  JdbcProxies.java:99        objectMethod
+//  JdbcProxies.java:109       isObjectMethod
+//  JdbcProxies.java:114       wrapper
+//  JdbcProxies.java:125       unsupported
+//  JdbcProxies.java:169       invoke
+//  JdbcProxies.java:214       setAutoCommit
+//  JdbcProxies.java:229       setDatabase
+//  JdbcProxies.java:240       ensureOpen
+//  JdbcProxies.java:246       statement
+//  JdbcProxies.java:291       invoke
+//  JdbcProxies.java:350       resolveSql
+//  JdbcProxies.java:367       execute
+//  JdbcProxies.java:394       executeBatch
+//  JdbcProxies.java:409       resultSet
+//  JdbcProxies.java:414       emptyResultSet
+//  JdbcProxies.java:453       invoke
+//  JdbcProxies.java:496       value
+//  JdbcProxies.java:506       columnIndex
+//  JdbcProxies.java:513       moveAbsolute
+//  JdbcProxies.java:521       resultSetMetaData
+//  JdbcProxies.java:548       databaseMetaData
+//  JdbcProxies.java:574       columns
+//  JdbcProxies.java:581       rows
+//  JdbcProxies.java:587       column
+//  JdbcProxies.java:593       sqlType
+//  JdbcProxies.java:608       bind
+//  JdbcProxies.java:629       isParameterSetter
+//  JdbcProxies.java:639       literal
+//  JdbcProxies.java:649       quote
+//  JdbcProxies.java:654       stringValue
+//  JdbcProxies.java:656       integerValue
+//  JdbcProxies.java:658       longValue
+//  JdbcProxies.java:660       doubleValue
+//  JdbcProxies.java:662       booleanValue
+// ------------------------------------------------------------------------------------------------
 package edu.csu.csudb.jdbc;
 
 import java.lang.reflect.InvocationHandler;
